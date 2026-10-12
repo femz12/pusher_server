@@ -9,6 +9,6 @@ pusher_server-*.tar
 *.beam
 .env
 
-
+# macOS system files
 .DS_Store
 **/.DS_Store
