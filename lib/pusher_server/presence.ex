@@ -9,19 +9,19 @@ defmodule PusherServer.Presence do
   `PusherServer.Naming.presence/1`), so two embedded instances never
   share membership state.
 
-  NOTE: state is local to this node/process. If you run multiple
-  replicas behind a load balancer, presence counts are only accurate
-  per-replica unless you swap this for something distributed (e.g.
-  `Phoenix.Tracker`). Fine for a single instance, same as running one
-  Reverb node without its Redis scaling driver.
+  This is the in-memory presence store used by `PusherServer.Backend.Local`
+  (single node). When `:redis_url` is set the Redis backend keeps presence in
+  Redis instead and this process is not started.
   """
   use GenServer
 
+  @doc false
   def start_link(opts) do
     name = Keyword.fetch!(opts, :name)
     GenServer.start_link(__MODULE__, %{}, name: name)
   end
 
+  @impl true
   def init(state), do: {:ok, state}
 
   @doc "Returns true if this is the first connection for that user_id on the channel."
@@ -39,6 +39,7 @@ defmodule PusherServer.Presence do
     GenServer.call(server, {:members, channel})
   end
 
+  @impl true
   def handle_call({:add, channel, socket_id, user_id, user_info}, _from, state) do
     chan = Map.get(state, channel, %{})
     is_new = not Enum.any?(chan, fn {_sid, m} -> m.user_id == user_id end)

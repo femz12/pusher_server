@@ -11,6 +11,7 @@ defmodule PusherServer.Auth do
   instances can have different app credentials.
   """
 
+  @doc "HMAC-SHA256 of `string_to_sign` with `secret`, as lowercase hex. Every Pusher signature uses this."
   def sign(secret, string_to_sign) do
     :crypto.mac(:hmac, :sha256, secret, string_to_sign)
     |> Base.encode16(case: :lower)
@@ -49,6 +50,26 @@ defmodule PusherServer.Auth do
 
     expected = sign(config.app_secret, string_to_sign)
     secure_compare(expected, provided || "")
+  end
+
+  @max_clock_skew_s 600
+
+  @doc """
+  The REST signature only covers the query string, which includes
+  `body_md5`. This checks that `body_md5` really is the MD5 of the request
+  body — without it the signature would not protect the payload.
+  """
+  def valid_body_md5?(query_params, body) when is_binary(body) do
+    expected = :crypto.hash(:md5, body) |> Base.encode16(case: :lower)
+    secure_compare(expected, String.downcase(query_params["body_md5"] || ""))
+  end
+
+  @doc "Rejects requests whose `auth_timestamp` is more than 10 minutes off, so a captured request can't be replayed later."
+  def fresh_timestamp?(query_params, now_s \\ System.system_time(:second)) do
+    case Integer.parse(query_params["auth_timestamp"] || "") do
+      {ts, ""} -> abs(now_s - ts) <= @max_clock_skew_s
+      _ -> false
+    end
   end
 
   # Constant-time comparison to avoid timing attacks on signature checks.

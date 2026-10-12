@@ -9,7 +9,7 @@ ENV MIX_ENV=prod
 RUN mix local.hex --force && mix local.rebar --force
 
 # Cache deps separately from source changes
-COPY mix.exs ./
+COPY mix.exs mix.lock* ./
 RUN mix deps.get --only prod
 RUN mix deps.compile
 
@@ -20,7 +20,7 @@ RUN mix compile
 RUN mix release
 
 # --- Runtime stage ---
-FROM elixir:1.17-alpine AS app
+FROM alpine:3.20 AS app
 
 RUN apk add --no-cache libstdc++ openssl ncurses-libs libgcc wget
 
@@ -34,11 +34,9 @@ USER app
 
 EXPOSE 6001
 
-# Elixir releases translate SIGTERM into a controlled `Application.stop/1`
-# for every app (see PusherServer.Application.stop/1) before the VM exits,
-# so `docker stop` triggers a graceful drain rather than a hard kill.
-# Give it a bit more than the 1s drain sleep in stop/1:
-#   docker stop --time 10 <container>
+# On SIGTERM the release stops the app; PusherServer.Application.prep_stop/1
+# drains connected clients (pusher:error 4000) and waits ~1s first.
+# Give the container more than that:  docker stop --time 10 <container>
 STOPSIGNAL SIGTERM
 
 HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \

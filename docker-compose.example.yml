@@ -1,24 +1,63 @@
-services:
-  app:
-    build: .
-    # your existing Laravel app service
-    environment:
-      BROADCAST_CONNECTION: pusher
-      PUSHER_APP_ID: app-id
-      PUSHER_APP_KEY: app-key
-      PUSHER_APP_SECRET: app-secret
-      PUSHER_HOST: pusher-server
-      PUSHER_PORT: 6001
-      PUSHER_SCHEME: http
-    depends_on:
-      - pusher-server
+# Two pusher_server nodes sharing one Redis, behind an nginx load balancer.
+# Point Laravel (PUSHER_HOST / PUSHER_PORT) and your Echo client at the `lb`
+# service. For a single node you can drop everything except one `pusher-1`
+# without PUSHER_REDIS_URL — Redis is only needed with more than one node.
+#
+#   docker compose -f docker-compose.example.yml up --build
 
-  pusher-server:
-    build: ./pusher_elixir
-    ports:
-      - "6001:6001"
+services:
+  redis:
+    image: redis:7-alpine
+    # pusher_server only keeps ephemeral state in Redis (who is subscribed
+    # right now). If Redis restarts empty, the running nodes write their state
+    # back within ~10s, so nothing needs to be persisted.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  pusher-1: &pusher
+    build: .
+    # or, once you publish the image: ghcr.io/femz12/pusher_server:latest
     environment:
       PUSHER_APP_ID: app-id
       PUSHER_APP_KEY: app-key
       PUSHER_APP_SECRET: app-secret
-      PORT: 6001
+      PUSHER_REDIS_URL: redis://redis:6379
+      PORT: "6001"
+    depends_on:
+      redis:
+        condition: service_healthy
+    # A little longer than the 1s drain window so `docker stop` can tell
+    # connected clients to reconnect before the container is killed.
+    stop_grace_period: 10s
+
+  pusher-2:
+    <<: *pusher
+
+  lb:
+    image: nginx:1.27-alpine
+    ports:
+      - "6001:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - pusher-1
+      - pusher-2
+
+  # Your Laravel app, pointed at the load balancer:
+  #
+  # app:
+  #   build: ../your-laravel-app
+  #   environment:
+  #     BROADCAST_CONNECTION: pusher
+  #     PUSHER_APP_ID: app-id
+  #     PUSHER_APP_KEY: app-key
+  #     PUSHER_APP_SECRET: app-secret
+  #     PUSHER_HOST: lb
+  #     PUSHER_PORT: 80
+  #     PUSHER_SCHEME: http
+  #   depends_on:
+  #     - lb

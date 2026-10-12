@@ -120,4 +120,44 @@ defmodule PusherServer.AuthTest do
       refute PusherServer.Auth.valid_request_signature?(@name, method, path, tampered)
     end
   end
+
+  describe "valid_body_md5?/2" do
+    test "accepts a body whose md5 matches body_md5" do
+      body = ~s({"name":"e","channels":["c"],"data":"{}"})
+      md5 = :crypto.hash(:md5, body) |> Base.encode16(case: :lower)
+
+      assert PusherServer.Auth.valid_body_md5?(%{"body_md5" => md5}, body)
+    end
+
+    test "rejects a body that was swapped after the request was signed" do
+      signed_body = ~s({"name":"e","channels":["c"],"data":"{}"})
+      md5 = :crypto.hash(:md5, signed_body) |> Base.encode16(case: :lower)
+
+      refute PusherServer.Auth.valid_body_md5?(
+               %{"body_md5" => md5},
+               ~s({"name":"evil","channels":["c"],"data":"{}"})
+             )
+    end
+
+    test "rejects a request with no body_md5" do
+      refute PusherServer.Auth.valid_body_md5?(%{}, "{}")
+    end
+  end
+
+  describe "fresh_timestamp?/2" do
+    test "accepts a current timestamp and one inside the 10 minute window" do
+      now = 1_700_000_000
+      assert PusherServer.Auth.fresh_timestamp?(%{"auth_timestamp" => "#{now}"}, now)
+      assert PusherServer.Auth.fresh_timestamp?(%{"auth_timestamp" => "#{now - 599}"}, now)
+      assert PusherServer.Auth.fresh_timestamp?(%{"auth_timestamp" => "#{now + 599}"}, now)
+    end
+
+    test "rejects stale, future, missing and garbage timestamps" do
+      now = 1_700_000_000
+      refute PusherServer.Auth.fresh_timestamp?(%{"auth_timestamp" => "#{now - 601}"}, now)
+      refute PusherServer.Auth.fresh_timestamp?(%{"auth_timestamp" => "#{now + 601}"}, now)
+      refute PusherServer.Auth.fresh_timestamp?(%{}, now)
+      refute PusherServer.Auth.fresh_timestamp?(%{"auth_timestamp" => "soon"}, now)
+    end
+  end
 end

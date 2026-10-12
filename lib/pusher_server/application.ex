@@ -16,6 +16,7 @@ defmodule PusherServer.Application do
   use Application
   require Logger
 
+  @impl true
   def start(_type, _args) do
     children =
       if Application.get_env(:pusher_server, :standalone?, false) do
@@ -27,19 +28,27 @@ defmodule PusherServer.Application do
     Supervisor.start_link(children, strategy: :one_for_one, name: PusherServer.RootSupervisor)
   end
 
-  @doc """
-  Called by OTP when the application is stopping (e.g. on SIGTERM during
-  `docker stop` / a rolling deploy of the standalone release). Drains
-  connections instead of just letting every socket die mid-flight.
-  """
-  def stop(_state) do
+  # Must be `prep_stop/1`, not `stop/1`: OTP calls prep_stop *before* it shuts
+  # down the supervision tree (the registry and sockets still exist, so they
+  # can be told to leave), whereas stop/1 runs after everything is already gone.
+  @impl true
+  def prep_stop(state) do
     if Application.get_env(:pusher_server, :standalone?, false) do
-      PusherServer.drain(PusherServer)
-      # brief window so clients can receive the close frame and start
-      # reconnecting before the BEAM actually goes down
-      Process.sleep(1_000)
+      drain_standalone()
     end
 
-    :ok
+    state
+  end
+
+  # Called on SIGTERM (`docker stop`, a rolling deploy) for the standalone
+  # release: stop accepting connections and tell every client to reconnect,
+  # then give the close frames a moment to leave before the sockets are torn down.
+  defp drain_standalone do
+    PusherServer.drain(PusherServer)
+    Process.sleep(1_000)
+  rescue
+    error -> Logger.warning("PusherServer: graceful drain failed: #{Exception.message(error)}")
+  catch
+    :exit, reason -> Logger.warning("PusherServer: graceful drain failed: #{inspect(reason)}")
   end
 end
