@@ -2,7 +2,7 @@ defmodule PusherServer.MixProject do
   use Mix.Project
 
   @source_url "https://github.com/femz12/pusher_server"
-  @version "0.1.1"
+  @version "0.1.2"
 
   def project do
     [
