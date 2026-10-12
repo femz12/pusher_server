@@ -8,3 +8,7 @@ erl_crash.dump
 pusher_server-*.tar
 *.beam
 .env
+
+
+.DS_Store
+**/.DS_Store
