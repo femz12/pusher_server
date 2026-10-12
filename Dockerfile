@@ -1,5 +1,7 @@
 # --- Build stage ---
-FROM elixir:1.17-alpine AS build
+ARG ALPINE_VERSION=3.20.6
+
+FROM hexpm/elixir:1.17.3-erlang-27.2.4-alpine-${ALPINE_VERSION} AS build
 
 RUN apk add --no-cache build-base git
 
@@ -20,7 +22,8 @@ RUN mix compile
 RUN mix release
 
 # --- Runtime stage ---
-FROM alpine:3.20 AS app
+ARG ALPINE_VERSION
+FROM alpine:${ALPINE_VERSION} AS app
 
 RUN apk add --no-cache libstdc++ openssl ncurses-libs libgcc wget
 

@@ -4,3 +4,5 @@ deps/
 *.beam
 erl_crash.dump
 .git/
+doc
+cover
