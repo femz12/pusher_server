@@ -7,8 +7,8 @@ defmodule PusherServer.WsHandler do
   channel auth, client events, and delivering events pushed in via the
   HTTP trigger endpoint (see PusherServer.HttpRouter) or from other nodes.
 
-  Receives the instance `name` via cowboy route opts (see
-  `PusherServer.child_spec/1`), so the same handler code serves any number
+  Receives the instance `name` via cowboy route opts (set up in
+  `PusherServer`), so the same handler code serves any number
   of independently-configured instances. Everything that must be shared
   between nodes goes through `PusherServer.Cluster`.
   """

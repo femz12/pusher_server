@@ -6,7 +6,7 @@ defmodule PusherServer.Presence do
   `member_removed` only fires when their last connection drops.
 
   Every instance gets its own Presence process (named via
-  `PusherServer.Naming.presence/1`), so two embedded instances never
+  an internal naming helper), so two embedded instances never
   share membership state.
 
   This is the in-memory presence store used by `PusherServer.Backend.Local`

@@ -61,6 +61,8 @@ defmodule PusherServer.Config do
     :metrics_token
   ]
 
+  @type t :: %__MODULE__{}
+
   # Resolves and caches config for `name` from `opts` + env var fallbacks.
   @doc false
   def resolve(name, opts) do

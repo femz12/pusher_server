@@ -123,4 +123,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: see
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+MIT, see [LICENSE](https://github.com/femz12/pusher_server/blob/main/LICENSE).
