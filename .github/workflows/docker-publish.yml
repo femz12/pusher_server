@@ -4,6 +4,8 @@ name: Publish Docker image
 # Docker Hub when you set, in the repo's Settings > Secrets and variables > Actions:
 #   variable  DOCKERHUB_USERNAME   (your Docker Hub username or org)
 #   secret    DOCKERHUB_TOKEN      (a Docker Hub access token with Read & Write)
+#   variable  DOCKERHUB_NAMESPACE  (optional: publish under this user or org, e.g. socketelx,
+#                                   instead of DOCKERHUB_USERNAME. Your login must have write access to it.)
 # Without them, only ghcr.io is used.
 
 on:
@@ -43,7 +45,7 @@ jobs:
         with:
           images: |
             ghcr.io/${{ github.repository }}
-            ${{ vars.DOCKERHUB_USERNAME != '' && format('{0}/socketelx', vars.DOCKERHUB_USERNAME) || '' }}
+            ${{ vars.DOCKERHUB_USERNAME != '' && format('{0}/socketelx', vars.DOCKERHUB_NAMESPACE || vars.DOCKERHUB_USERNAME) || '' }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
