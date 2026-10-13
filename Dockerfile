@@ -8,6 +8,8 @@ RUN apk add --no-cache build-base git
 WORKDIR /app
 ENV MIX_ENV=prod
 
+ENV ERL_FLAGS="+JMsingle true"
+
 RUN mix local.hex --force && mix local.rebar --force
 
 # Cache deps separately from source changes
