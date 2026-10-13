@@ -39,7 +39,7 @@ jobs:
         with:
           images: |
             ghcr.io/${{ github.repository }}
-            ${{ vars.DOCKERHUB_USERNAME != '' && format('{0}/pusher_server', vars.DOCKERHUB_USERNAME) || '' }}
+            ${{ vars.DOCKERHUB_USERNAME != '' && format('{0}/socketelx', vars.DOCKERHUB_USERNAME) || '' }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}

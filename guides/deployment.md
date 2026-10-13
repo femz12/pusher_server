@@ -6,7 +6,7 @@ The `Dockerfile` builds an Elixir release and runs it as a non-root user. It
 exposes port 6001 and has a `HEALTHCHECK` that requests `GET /` (returns `ok`).
 
 ```bash
-docker build -t pusher-server .
+docker build -t socketelx .
 ```
 
 ### Publishing the image
@@ -16,12 +16,12 @@ which pushes `0.1.0`, `0.1` and `latest` to GitHub Container Registry. To also
 publish to Docker Hub, add a repository variable `DOCKERHUB_USERNAME` and a
 secret `DOCKERHUB_TOKEN` (a Docker Hub access token with Read & Write) under
 Settings > Secrets and variables > Actions. The image is named
-`<username>/pusher_server`. To push by hand instead:
+`<username>/socketelx`. To push by hand instead:
 
 ```bash
-docker build -t YOUR_USER/pusher_server:0.1.0 -t YOUR_USER/pusher_server:latest .
+docker build -t YOUR_USER/socketelx:0.1.0 -t YOUR_USER/socketelx:latest .
 docker login
-docker push YOUR_USER/pusher_server:0.1.0 && docker push YOUR_USER/pusher_server:latest
+docker push YOUR_USER/socketelx:0.1.0 && docker push YOUR_USER/socketelx:latest
 ```
 
 The image is amd64 only unless you build with `docker buildx --platform
@@ -33,8 +33,8 @@ Configuration is by environment variable; see [Configuration](configuration.md).
 
 The server speaks plain HTTP and WebSocket only. Terminate TLS at a reverse
 proxy or load balancer (nginx, Caddy, Traefik, an ALB) and serve `wss://` to
-browsers. Then set `PUSHER_SCHEME=https`, `forceTLS: true` and the public
-port in Laravel and Echo.
+browsers. Then switch your client and server libraries to TLS (`forceTLS: true`,
+`useTLS: true`) and the public port.
 
 ## Reverse proxy
 
@@ -73,16 +73,16 @@ node, they reconnect when it is back.
 ## Docker Compose
 
 `docker-compose.example.yml` runs two nodes, Redis and nginx. For one node,
-keep a single `pusher-1` service and drop `PUSHER_REDIS_URL`.
+keep a single `socketelx-1` service and drop `SOCKETELX_REDIS_URL`.
 
 ## Checklist
 
-1. Set your own `PUSHER_APP_SECRET`.
+1. Set your own `SOCKETELX_APP_SECRET`.
 2. Terminate TLS in front.
 3. Make the proxy timeouts longer than 60 s.
 4. Do not expose the REST API more widely than needed; it is signed.
 5. Monitor the health endpoint and, if you enable it, `/metrics` (protect it
-   with `PUSHER_METRICS_TOKEN` or block it at the proxy).
-6. Consider `PUSHER_REST_RATE_LIMIT` and `PUSHER_MAX_CONNECTIONS` as safety
+   with `SOCKETELX_METRICS_TOKEN` or block it at the proxy).
+6. Consider `SOCKETELX_REST_RATE_LIMIT` and `SOCKETELX_MAX_CONNECTIONS` as safety
    valves; see [Configuration](configuration.md#rate-limits-and-capacity).
 7. Load test with your expected connection count before going live.

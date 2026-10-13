@@ -5,7 +5,7 @@
 /.elixir_ls/
 erl_crash.dump
 *.ez
-pusher_server-*.tar
+socketelx-*.tar
 *.beam
 .env
 

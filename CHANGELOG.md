@@ -6,19 +6,39 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.0]
+
+### Changed (breaking)
+- **Renamed from `pusher_server` to Socketelx.** The Hex package, OTP app and release
+  are `socketelx`, the main module is `Socketelx` (was `PusherServer`), and the Docker image
+  is `socketelx`. Update `{:pusher_server, ...}` to `{:socketelx, ...}` and
+  `{PusherServer, ...}` to `{Socketelx, ...}`.
+- Environment variables are now `SOCKETELX_*`. The old `PUSHER_*` names are still
+  accepted, and `SOCKETELX_*` wins when both are set.
+- Metric names start with `socketelx_` (was `pusher_server_`), and Redis keys start
+  with `socketelx:` (was `pusher:`). Redis state is ephemeral, so nothing needs migrating.
+
 ### Added
+- `Socketelx.trigger/5` publishes an event straight from your Elixir code, and
+  `Socketelx.authorize_channel/4` signs private and presence channel joins,
+  so an embedded app needs no HTTP round trip.
+- `examples/chat`: a complete chat app (presence, messages, typing indicator) as
+  a standalone Docker version and an embedded Elixir version, with a smoke test.
+- `bench/load.mjs` and a load-testing guide to simulate many connections.
+- Documentation reworked around `pusher-js` and the official Pusher server
+  libraries; Laravel setup moved to its own guide.
 - `POST /apps/:app_id/batch_events` (up to 10 events per request) and
   `GET /apps/:app_id/channels` (with `filter_by_prefix` and
   `info=user_count`), both working across nodes with Redis.
-- The Docker workflow can also publish to Docker Hub, and tags `0.1.0`, `0.1` and `latest`.
-- `PUSHER_BATCH_LIMIT` (default 10) sets the `batch_events` size limit.
-- Webhook retries with exponential backoff (`PUSHER_WEBHOOK_RETRIES`,
+- The Docker workflow can also publish to Docker Hub, and tags semver versions and `latest`.
+- `SOCKETELX_BATCH_LIMIT` (default 10) sets the `batch_events` size limit.
+- Webhook retries with exponential backoff (`SOCKETELX_WEBHOOK_RETRIES`,
   default 3). 5xx, 408, 429 and network errors are retried; other 4xx are not.
-- Optional limits, all off by default: `PUSHER_REST_RATE_LIMIT`,
-  `PUSHER_CLIENT_EVENT_RATE_LIMIT`, `PUSHER_MAX_CONNECTIONS`.
-- Optional Prometheus metrics at `GET /metrics` (`PUSHER_METRICS`,
-  `PUSHER_METRICS_TOKEN`).
-- Multi-server mode: set `PUSHER_REDIS_URL` (or the `:redis_url` option) and
+- Optional limits, all off by default: `SOCKETELX_REST_RATE_LIMIT`,
+  `SOCKETELX_CLIENT_EVENT_RATE_LIMIT`, `SOCKETELX_MAX_CONNECTIONS`.
+- Optional Prometheus metrics at `GET /metrics` (`SOCKETELX_METRICS`,
+  `SOCKETELX_METRICS_TOKEN`).
+- Multi-server mode: set `SOCKETELX_REDIS_URL` (or the `:redis_url` option) and
   several nodes share broadcasts, presence and channel occupancy through
   Redis. A janitor heartbeats each node, removes state left by dead nodes
   and rebuilds a node's state if Redis loses its data. Single-node use is
@@ -35,6 +55,7 @@ follows [Semantic Versioning](https://semver.org/).
   server's own idle timeout.
 
 ### Fixed
+- Several ExDoc warnings (hidden-function links, missing `Config.t()` type).
 - Graceful shutdown never reached clients: the drain ran in
   `Application.stop/1`, which OTP calls after the supervision tree is gone.
   It now runs in `prep_stop/1`, with a regression test.

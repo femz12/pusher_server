@@ -9,7 +9,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
-    # A real Redis, so the multi-node tests (test/pusher_server/cluster_redis_test.exs)
+    # A real Redis, so the multi-node tests (test/socketelx/cluster_redis_test.exs)
     # run instead of being skipped.
     services:
       redis:
@@ -23,7 +23,7 @@ jobs:
           --health-retries 10
 
     env:
-      PUSHER_TEST_REDIS_URL: redis://localhost:6379/15
+      SOCKETELX_TEST_REDIS_URL: redis://localhost:6379/15
 
     steps:
       - uses: actions/checkout@v4

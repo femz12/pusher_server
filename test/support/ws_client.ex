@@ -1,4 +1,4 @@
-defmodule PusherServer.TestWsClient do
+defmodule Socketelx.TestWsClient do
   @moduledoc false
   # A tiny RFC 6455 client over :gen_tcp so integration tests can talk to the
   # real server over real sockets without adding a dependency. Every decoded

@@ -1,27 +1,27 @@
-defmodule PusherServer.MixProject do
+defmodule Socketelx.MixProject do
   use Mix.Project
 
-  @source_url "https://github.com/femz12/pusher_server"
-  @version "0.1.2"
+  @source_url "https://github.com/socketelx/socketelx"
+  @version "0.2.0"
 
   def project do
     [
-      app: :pusher_server,
+      app: :socketelx,
       version: @version,
       elixir: "~> 1.16",
       start_permanent: Mix.env() == :prod,
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       releases: [
-        pusher_server: [
+        socketelx: [
           include_executables_for: [:unix]
         ]
       ],
 
       # --- Hex package metadata (fill in before `mix hex.publish`) ---
       description:
-        "A self-hosted, Pusher-protocol-compatible WebSocket server " <>
-          "(drop-in for Laravel Reverb) built on Cowboy.",
+        "A Pusher-compatible WebSocket server for Elixir, inspired by Laravel Reverb. " <>
+          "Run it as a Docker image or embed it in your Elixir app.",
       package: package(),
       docs: docs(),
       source_url: @source_url,
@@ -32,7 +32,7 @@ defmodule PusherServer.MixProject do
   def application do
     [
       extra_applications: [:logger, :crypto, :inets, :ssl],
-      mod: {PusherServer.Application, []}
+      mod: {Socketelx.Application, []}
     ]
   end
 
@@ -72,20 +72,24 @@ defmodule PusherServer.MixProject do
         "guides/multi-server.md",
         "guides/deployment.md",
         "guides/protocol-support.md",
+        "guides/load-testing.md",
         "guides/troubleshooting.md",
+        "guides/laravel.md",
+        {"examples/chat/README.md", [filename: "chat-example", title: "Chat example"]},
         "CONTRIBUTING.md",
         "SECURITY.md",
         "CHANGELOG.md"
       ],
       groups_for_extras: [
         Guides: ~r{guides/},
+        Examples: ["examples/chat/README.md"],
         Project: ["CONTRIBUTING.md", "SECURITY.md", "CHANGELOG.md"]
       ],
       groups_for_modules: [
-        "Public API": [PusherServer],
-        Configuration: [PusherServer.Config],
-        Backends: [PusherServer.Backend, PusherServer.Backend.Local, PusherServer.Backend.Redis],
-        Internals: ~r/^PusherServer\.(?!Backend$|Backend\.Local$|Backend\.Redis$|Config$)/
+        "Public API": [Socketelx],
+        Configuration: [Socketelx.Config],
+        Backends: [Socketelx.Backend, Socketelx.Backend.Local, Socketelx.Backend.Redis],
+        Internals: ~r/^Socketelx\.(?!Backend$|Backend\.Local$|Backend\.Redis$|Config$)/
       ]
     ]
   end

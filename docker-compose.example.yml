@@ -1,14 +1,14 @@
-# Two pusher_server nodes sharing one Redis, behind an nginx load balancer.
-# Point Laravel (PUSHER_HOST / PUSHER_PORT) and your Echo client at the `lb`
-# service. For a single node you can drop everything except one `pusher-1`
-# without PUSHER_REDIS_URL — Redis is only needed with more than one node.
+# Two socketelx nodes sharing one Redis, behind an nginx load balancer.
+# Point your backend (host / port) and your browser client at the `lb`
+# service. For a single node you can drop everything except one `socketelx-1`
+# without SOCKETELX_REDIS_URL — Redis is only needed with more than one node.
 #
 #   docker compose -f docker-compose.example.yml up --build
 
 services:
   redis:
     image: redis:7-alpine
-    # pusher_server only keeps ephemeral state in Redis (who is subscribed
+    # socketelx only keeps ephemeral state in Redis (who is subscribed
     # right now). If Redis restarts empty, the running nodes write their state
     # back within ~10s, so nothing needs to be persisted.
     command: ["redis-server", "--save", "", "--appendonly", "no"]
@@ -18,14 +18,14 @@ services:
       timeout: 3s
       retries: 10
 
-  pusher-1: &pusher
+  socketelx-1: &socketelx
     build: .
-    # or, once you publish the image: ghcr.io/femz12/pusher_server:latest
+    # or, once you publish the image: ghcr.io/socketelx/socketelx:latest
     environment:
-      PUSHER_APP_ID: app-id
-      PUSHER_APP_KEY: app-key
-      PUSHER_APP_SECRET: app-secret
-      PUSHER_REDIS_URL: redis://redis:6379
+      SOCKETELX_APP_ID: app-id
+      SOCKETELX_APP_KEY: app-key
+      SOCKETELX_APP_SECRET: app-secret
+      SOCKETELX_REDIS_URL: redis://redis:6379
       PORT: "6001"
     depends_on:
       redis:
@@ -34,8 +34,8 @@ services:
     # connected clients to reconnect before the container is killed.
     stop_grace_period: 10s
 
-  pusher-2:
-    <<: *pusher
+  socketelx-2:
+    <<: *socketelx
 
   lb:
     image: nginx:1.27-alpine
@@ -44,20 +44,14 @@ services:
     volumes:
       - ./deploy/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      - pusher-1
-      - pusher-2
+      - socketelx-1
+      - socketelx-2
 
-  # Your Laravel app, pointed at the load balancer:
+  # Your own backend (any language), pointed at the load balancer:
   #
   # app:
-  #   build: ../your-laravel-app
-  #   environment:
-  #     BROADCAST_CONNECTION: pusher
-  #     PUSHER_APP_ID: app-id
-  #     PUSHER_APP_KEY: app-key
-  #     PUSHER_APP_SECRET: app-secret
-  #     PUSHER_HOST: lb
-  #     PUSHER_PORT: 80
-  #     PUSHER_SCHEME: http
+  #   build: ../your-backend
+  #   # use host `lb` and port 80 for the realtime server, and the same
+  #   # app id, key and secret as above
   #   depends_on:
   #     - lb

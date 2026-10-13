@@ -1,0 +1,30 @@
+# Run the chat with the standalone Docker image:
+#   docker compose up
+# then open http://localhost:3000 in two browser tabs.
+services:
+  socketelx:
+    image: ghcr.io/socketelx/socketelx:latest
+    ports:
+      - "6001:6001"
+    environment:
+      SOCKETELX_APP_ID: chat
+      SOCKETELX_APP_KEY: chat-key
+      SOCKETELX_APP_SECRET: change-me-please   # use a long random value for anything real
+
+  chat:
+    image: node:22-alpine
+    working_dir: /app
+    command: node server.mjs
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./server.mjs:/app/server.mjs:ro
+      - ./public:/app/public:ro
+    environment:
+      SOCKETELX_APP_ID: chat
+      SOCKETELX_APP_KEY: chat-key
+      SOCKETELX_APP_SECRET: change-me-please
+      SOCKETELX_URL: http://socketelx:6001        # how the backend reaches the server (inside Docker)
+      PUBLIC_WS_PORT: "6001"                # how browsers reach it
+    depends_on:
+      - socketelx

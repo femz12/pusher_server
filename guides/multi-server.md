@@ -8,8 +8,8 @@ disconnecting everyone at once. They coordinate through a single Redis.
 
 On every node set the **same**:
 
-- `PUSHER_APP_ID`, `PUSHER_APP_KEY`, `PUSHER_APP_SECRET`
-- `PUSHER_REDIS_URL`, for example `redis://:password@redis:6379` (`rediss://` for TLS)
+- `SOCKETELX_APP_ID`, `SOCKETELX_APP_KEY`, `SOCKETELX_APP_SECRET`
+- `SOCKETELX_REDIS_URL`, for example `redis://:password@redis:6379` (`rediss://` for TLS)
 
 Put a load balancer in front. `deploy/nginx.conf` is an example and
 `docker-compose.example.yml` runs two nodes, Redis and nginx together:
@@ -21,7 +21,7 @@ docker compose -f docker-compose.example.yml up --build
 No sticky sessions are needed. A WebSocket stays on the node it connected to,
 and REST calls from your backend can land on any node.
 
-Embedded: `{PusherServer, name: MyApp.PusherServer, redis_url: "redis://localhost:6379", ...}`.
+Embedded: `{Socketelx, name: MyApp.Socketelx, redis_url: "redis://localhost:6379", ...}`.
 
 ## What is shared
 
@@ -31,7 +31,7 @@ Embedded: `{PusherServer, name: MyApp.PusherServer, redis_url: "redis://localhos
 - `channel_occupied` / `channel_vacated` webhooks fire once cluster-wide.
 - The channel info endpoint counts subscribers on all nodes, and the channel
   list (`GET /apps/:app_id/channels`) includes channels from every node.
-- Rate limits, `PUSHER_MAX_CONNECTIONS` and metrics are per node, not shared.
+- Rate limits, `SOCKETELX_MAX_CONNECTIONS` and metrics are per node, not shared.
 
 ## When things fail
 
@@ -52,7 +52,7 @@ Embedded: `{PusherServer, name: MyApp.PusherServer, redis_url: "redis://localhos
   100 members) but not for huge ones.
 - Redis Cluster (sharded) is not supported. Use a single endpoint: plain,
   Sentinel, or a managed primary/replica service.
-- Keys are prefixed `pusher:<app_id>`, so several apps can share one Redis.
+- Keys are prefixed `socketelx:<app_id>`, so several apps can share one Redis.
 
 ## Checking it works
 

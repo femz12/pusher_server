@@ -1,28 +1,23 @@
 # Getting started
 
-This guide runs the standalone server and connects a Laravel app (and its
-Echo client) to it. If you want to embed the server in an Elixir app instead,
-see the [Embedding guide](embedding.md).
-
-> Laravel and Echo compatibility is by protocol: the server implements what the
-> `pusher` broadcaster and `pusher-js` use. It has not yet been tested end to
-> end against a real Laravel app. Treat the first run as a test.
+This guide runs the server and connects a browser and a backend to it. To
+embed the server in an Elixir app instead, see the [Embedding guide](embedding.md).
+For a finished app you can copy, see the [chat example](../examples/chat/README.md).
 
 ## 1. Run the server
 
 ```bash
-docker build -t pusher-server .
 docker run -p 6001:6001 \
-  -e PUSHER_APP_ID=my-app-id \
-  -e PUSHER_APP_KEY=my-app-key \
-  -e PUSHER_APP_SECRET=a-long-random-secret \
-  pusher-server
+  -e SOCKETELX_APP_ID=my-app-id \
+  -e SOCKETELX_APP_KEY=my-app-key \
+  -e SOCKETELX_APP_SECRET=a-long-random-secret \
+  ghcr.io/socketelx/socketelx:latest
 ```
 
-Generate a real secret, for example with `openssl rand -hex 32`. If you leave
-the secret unset the server falls back to a public default and logs a warning,
-because anyone who knows it could sign requests and subscribe to private
-channels.
+The three values are your app's credentials. Generate the secret with
+`openssl rand -hex 32` and keep it on your backend only; the key is public. If
+you leave the secret unset the server uses a public default and logs a warning,
+because anyone who knows it can sign requests.
 
 Check it is up:
 
@@ -31,103 +26,117 @@ curl http://localhost:6001/
 # ok
 ```
 
-## 2. Point Laravel at it
-
-Install the PHP SDK if you haven't:
+## 2. Connect a browser
 
 ```bash
-composer require pusher/pusher-php-server
-```
-
-`.env` (use `BROADCAST_DRIVER` instead of `BROADCAST_CONNECTION` on Laravel 10
-and older):
-
-```dotenv
-BROADCAST_CONNECTION=pusher
-PUSHER_APP_ID=my-app-id
-PUSHER_APP_KEY=my-app-key
-PUSHER_APP_SECRET=a-long-random-secret
-PUSHER_HOST=127.0.0.1
-PUSHER_PORT=6001
-PUSHER_SCHEME=http
-
-VITE_PUSHER_APP_KEY="${PUSHER_APP_KEY}"
-VITE_PUSHER_HOST="${PUSHER_HOST}"
-VITE_PUSHER_PORT="${PUSHER_PORT}"
-```
-
-The three values (id, key, secret) must be identical on the server and in
-Laravel. `config/broadcasting.php`:
-
-```php
-'pusher' => [
-    'driver' => 'pusher',
-    'key' => env('PUSHER_APP_KEY'),
-    'secret' => env('PUSHER_APP_SECRET'),
-    'app_id' => env('PUSHER_APP_ID'),
-    'options' => [
-        'host' => env('PUSHER_HOST', '127.0.0.1'),
-        'port' => env('PUSHER_PORT', 6001),
-        'scheme' => env('PUSHER_SCHEME', 'http'),
-        'useTLS' => env('PUSHER_SCHEME', 'http') === 'https',
-    ],
-],
-```
-
-If your app queues broadcasts, make sure a queue worker is running, or events
-will never be sent.
-
-## 3. Point the browser at it
-
-```bash
-npm install --save-dev laravel-echo pusher-js
+npm install pusher-js
 ```
 
 ```js
-// resources/js/echo.js
-import Echo from 'laravel-echo';
 import Pusher from 'pusher-js';
 
-window.Pusher = Pusher;
-
-window.Echo = new Echo({
-    broadcaster: 'pusher',
-    key: import.meta.env.VITE_PUSHER_APP_KEY,
-    wsHost: import.meta.env.VITE_PUSHER_HOST,
-    wsPort: import.meta.env.VITE_PUSHER_PORT,
-    wssPort: import.meta.env.VITE_PUSHER_PORT,
-    forceTLS: false,
-    enabledTransports: ['ws', 'wss'],
-    cluster: 'mt1', // required by pusher-js, ignored by this server
+const pusher = new Pusher('my-app-key', {
+  cluster: 'unused',            // pusher-js requires it; this server ignores it
+  wsHost: 'localhost',
+  wsPort: 6001,
+  wssPort: 6001,
+  forceTLS: false,              // true when you serve wss:// through a proxy
+  enabledTransports: ['ws', 'wss'],
+  disableStats: true,
 });
+
+pusher.connection.bind('state_change', (s) => console.log(s.current));
+
+const channel = pusher.subscribe('news');
+channel.bind('update', (data) => console.log('got', data));
 ```
 
-Private and presence channels need Laravel's `/broadcasting/auth` route, as with
-any Pusher setup. That route signs the subscription with the same secret the
-server checks.
+You should see `connected` in the console. Any channel name that does not start
+with `private-` or `presence-` is public and needs no auth.
 
-## 4. Try it
+## 3. Send an event from your backend
 
-Subscribe from the browser console:
+Use any official Pusher server library. Point it at your server instead of
+pusher.com.
+
+Node (`npm install pusher`):
 
 ```js
-Echo.channel('orders').listen('.test', (e) => console.log(e));
+import Pusher from 'pusher';
+
+const pusher = new Pusher({
+  appId: 'my-app-id', key: 'my-app-key', secret: 'a-long-random-secret',
+  host: '127.0.0.1', port: '6001', useTLS: false,
+});
+
+await pusher.trigger('news', 'update', { hello: 'world' });
+await pusher.triggerBatch([
+  { channel: 'news', name: 'update', data: '{"n":1}' },
+  { channel: 'alerts', name: 'ping', data: '{}' },
+]);
 ```
 
-Then send an event from Laravel (`php artisan tinker`):
+Other languages are the same idea: set the host and port, keep TLS off for a
+local server. Without a library, send a signed request yourself; the
+[Troubleshooting guide](troubleshooting.md#test-the-rest-api-by-hand) has a
+copy-paste `curl` that does it.
 
-```php
-broadcast(new class implements Illuminate\Contracts\Broadcasting\ShouldBroadcastNow {
-    public function broadcastOn() { return new Illuminate\Broadcasting\Channel('orders'); }
-    public function broadcastAs() { return 'test'; }
+Run the Node script while the browser page is open and the browser logs the
+event.
+
+## 4. Private and presence channels
+
+Channels named `private-...` and `presence-...` need your backend to approve each
+join. pusher-js asks an endpoint you provide, and that endpoint signs the request
+with your secret.
+
+```js
+const pusher = new Pusher('my-app-key', {
+  /* ...same options as above... */
+  channelAuthorization: { endpoint: '/pusher/auth' },
+});
+
+const room = pusher.subscribe('presence-room');
+room.bind('pusher:subscription_succeeded', (members) => members.each((m) => console.log(m.id, m.info)));
+room.bind('pusher:member_added', (m) => console.log('joined', m.info));
+room.bind('pusher:member_removed', (m) => console.log('left', m.info));
+```
+
+Your `/pusher/auth` endpoint decides whether this user may join, then signs. With
+the Node SDK that is one call:
+
+```js
+app.post('/pusher/auth', (req, res) => {
+  const { socket_id, channel_name } = req.body;
+  // check your own session here, then:
+  const auth = pusher.authorizeChannel(socket_id, channel_name, {
+    user_id: String(user.id),
+    user_info: { name: user.name },   // anything you want other members to see
+  });
+  res.send(auth);
 });
 ```
 
-The browser should log the event. If nothing arrives, see
-[Troubleshooting](troubleshooting.md).
+`presence-` channels list who is online and announce joins and leaves. A user with
+several tabs counts once. Leave out `user_id` for plain `private-` channels.
+
+The [chat example](../examples/chat/README.md) puts all of this together, with
+client events for a "typing" indicator.
+
+## 5. React to what happens (optional)
+
+Set `SOCKETELX_WEBHOOK_URL` and the server tells your backend when channels fill and
+empty and when members come and go; see [Configuration](configuration.md#webhooks).
+
+## Using a framework
+
+- [Laravel](laravel.md): broadcasting and Echo.
+- Anything with an official Pusher server library works the same way as the Node
+  example above.
 
 ## Next
 
-- [Configuration](configuration.md) for webhooks and client events
+- [Configuration](configuration.md)
 - [Deployment](deployment.md) for TLS and proxies
 - [Multi-server](multi-server.md) to run more than one node
+- [Load testing](load-testing.md)

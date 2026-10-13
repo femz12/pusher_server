@@ -11,10 +11,10 @@ labels: bug
 **How to reproduce**
 
 **Setup**
-- pusher_server version:
+- socketelx version:
 - Standalone (Docker) or embedded:
 - One node or several (Redis)?
-- Client (pusher-js / laravel-echo / other, version):
+- Client (pusher-js / laravel-echo / server library, and version):
 - Elixir / OTP version (if embedded):
 
 **Logs and client error codes**

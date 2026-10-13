@@ -1,120 +1,168 @@
-# pusher_server
+# Socketelx
 
-A small Elixir server that speaks the [Pusher Channels](https://pusher.com/docs/channels/)
-WebSocket and HTTP protocol. Use it as a self-hosted replacement for Laravel
-Reverb, Soketi or Pusher itself: Laravel's built-in `pusher` broadcaster and
-`laravel-echo` / `pusher-js` talk to it unmodified.
+A Pusher-compatible WebSocket server for Elixir, inspired by Laravel Reverb.
+Browsers connect with `pusher-js` (or any Pusher client library), and your
+backend sends events with any Pusher server library or a plain signed HTTP
+request. You host it yourself.
 
-It ships two ways from the same code:
+Run it two ways, from the same code:
 
-- **Standalone**: a Docker image you run next to your app.
-- **Embedded**: a Hex dependency you add to your own supervision tree.
+- **Standalone:** a Docker image you run next to your app.
+- **Embedded:** a Hex dependency inside your own Elixir/Phoenix app.
 
-Runs on one server with no other services, or on several servers sharing a
-Redis. Redis is optional.
+It runs on one server with nothing else, or on several servers sharing a Redis.
 
-## Features
+> Socketelx is an independent open-source project. It implements the public Pusher
+> Channels protocol so existing Pusher clients and libraries work with it. It is
+> not affiliated with, endorsed by or sponsored by Pusher Ltd. "Pusher" is a
+> trademark of its owner and is used here only to describe compatibility.
 
-- Public, private and presence channels, with HMAC-SHA256 channel auth
-- Presence deduplicated per user across tabs (`member_added` / `member_removed`
-  fire on first join / last leave)
-- Client events (`client-*`) on private and presence channels
-- REST API signed like Pusher's: trigger events, batch events, list channels,
-  channel info
-- Signed webhooks (`channel_occupied`, `channel_vacated`, `member_added`,
-  `member_removed`, `client_event`) with retries
-- Optional rate limits and connection cap, and Prometheus metrics
+## What you can build with it
+
+Chat, live notifications, presence ("who is online"), live dashboards,
+collaborative cursors, order tracking: anything where the server pushes updates
+to browsers and phones as they happen.
+
+- Public, private and presence channels, with signed channel auth
+- Presence that counts a user once across tabs and devices
+- Client events (`client-*`) for things like typing indicators
+- REST API: trigger events, batch events, list channels, channel info
+- Signed webhooks with retries
+- Optional rate limits, connection cap, and Prometheus metrics
 - Multi-server mode through Redis (optional)
-- Graceful shutdown: clients are told to reconnect before the node exits
-- Several independent instances in one app (different app ids, different ports)
+- Graceful shutdown: clients are told to reconnect before a node exits
 
-## Quickstart: Docker + Laravel
+It works with the clients and libraries you probably already use: `pusher-js`,
+`laravel-echo`, and the official Pusher server SDKs (Node, PHP, Python, Ruby,
+Go and others).
+
+## Quickstart: Docker
 
 ```bash
-docker build -t pusher-server .
 docker run -p 6001:6001 \
-  -e PUSHER_APP_ID=my-app-id \
-  -e PUSHER_APP_KEY=my-app-key \
-  -e PUSHER_APP_SECRET=a-long-random-secret \
-  pusher-server
+  -e SOCKETELX_APP_ID=my-app-id \
+  -e SOCKETELX_APP_KEY=my-app-key \
+  -e SOCKETELX_APP_SECRET=a-long-random-secret \
+  ghcr.io/socketelx/socketelx:latest
 ```
 
-Point Laravel at it in `.env`:
+**In the browser** (`npm install pusher-js`):
 
-```dotenv
-BROADCAST_CONNECTION=pusher
-PUSHER_APP_ID=my-app-id
-PUSHER_APP_KEY=my-app-key
-PUSHER_APP_SECRET=a-long-random-secret
-PUSHER_HOST=127.0.0.1
-PUSHER_PORT=6001
-PUSHER_SCHEME=http
+```js
+import Pusher from 'pusher-js';
+
+const pusher = new Pusher('my-app-key', {
+  cluster: 'unused',            // required by pusher-js, ignored by this server
+  wsHost: 'localhost',
+  wsPort: 6001,
+  forceTLS: false,
+  enabledTransports: ['ws', 'wss'],
+  disableStats: true,
+});
+
+pusher.subscribe('news').bind('update', (data) => console.log(data));
 ```
 
-The full Laravel and Echo setup is in the
-[Getting started guide](guides/getting-started.md).
+**From your backend** (`npm install pusher`, shown in Node; every official SDK works the same way):
+
+```js
+import Pusher from 'pusher';
+
+const pusher = new Pusher({
+  appId: 'my-app-id', key: 'my-app-key', secret: 'a-long-random-secret',
+  host: '127.0.0.1', port: '6001', useTLS: false,
+});
+
+await pusher.trigger('news', 'update', { hello: 'world' });
+```
+
+The browser logs `{ hello: 'world' }`. Private and presence channels also need an
+auth endpoint in your backend; the [chat example](examples/chat/README.md) shows
+the whole thing.
 
 ## Quickstart: embed in your Elixir app
 
 ```elixir
 # mix.exs
-{:pusher_server, "~> 0.1"}
+{:socketelx, "~> 0.2"}
 
 # lib/my_app/application.ex
 children = [
   MyApp.Repo,
   MyAppWeb.Endpoint,
-  {PusherServer,
-   name: MyApp.PusherServer,
+  {Socketelx,
+   name: MyApp.Socketelx,
    port: 6001,
-   app_key: "my-key",
-   app_secret: "my-secret",
-   app_id: "my-app-id"}
+   app_id: "my-app-id",
+   app_key: "my-app-key",
+   app_secret: "a-long-random-secret"}
 ]
 ```
 
-Every option falls back to the same environment variables the standalone image
-uses. The server runs its own listener on its own port; it does not live inside
-your Phoenix endpoint. See the [Embedding guide](guides/embedding.md).
+Publish from anywhere in your app, with no HTTP call, and sign channel joins:
+
+```elixir
+Socketelx.trigger(MyApp.Socketelx, "news", "update", %{hello: "world"})
+
+Socketelx.authorize_channel(MyApp.Socketelx, socket_id, "presence-room",
+  user_id: user.id, user_info: %{name: user.name})
+```
+
+The server runs its own listener on its own port; it is not a Plug inside your
+Phoenix endpoint. See the [Embedding guide](guides/embedding.md).
+
+## A complete example: simple chat
+
+[`examples/chat`](examples/chat/README.md) is a small chat app (online list,
+messages, "is typing") in two versions: one using the Docker image with a tiny
+Node backend, one fully embedded in an Elixir app. Each is a few short files and
+a step-by-step setup.
+
+## Similar projects
+
+- [Poxa](https://github.com/edgurgel/poxa): an older, well-known Pusher-compatible server written in Elixir.
+- [Laravel Reverb](https://reverb.laravel.com/): the PHP server that inspired this project, speaking the same protocol.
 
 ## Several servers
 
-Set the same app credentials and the same `PUSHER_REDIS_URL` on every node and
-put a load balancer in front. Events, presence and occupancy are then shared
-across nodes. Without `PUSHER_REDIS_URL` no Redis connection is ever opened.
-See the [Multi-server guide](guides/multi-server.md).
+Give every node the same app credentials and the same `SOCKETELX_REDIS_URL`, and
+put a load balancer in front. Events, presence and channel occupancy are shared.
+Without `SOCKETELX_REDIS_URL` no Redis connection is ever opened. See the
+[Multi-server guide](guides/multi-server.md).
 
 ## Documentation
 
-- [Getting started](guides/getting-started.md): Docker, Laravel, Echo
+- [Getting started](guides/getting-started.md): run it and connect a client
 - [Configuration](guides/configuration.md): every option and environment variable
 - [Embedding](guides/embedding.md): use it as a library
-- [Multi-server](guides/multi-server.md): Redis, failure behaviour
-- [Deployment](guides/deployment.md): TLS, proxies, shutdown, Compose
+- [Multi-server](guides/multi-server.md): Redis and failure behaviour
+- [Deployment](guides/deployment.md): TLS, proxies, Docker, shutdown
+- [Load testing](guides/load-testing.md): simulate connections and measure capacity
 - [Protocol support](guides/protocol-support.md): what is and isn't implemented
 - [Troubleshooting](guides/troubleshooting.md)
+- [Using it with Laravel](guides/laravel.md)
 
 ## Status
 
-Early (0.x). The test suite starts real nodes on real sockets, speaks the
-WebSocket protocol to them, signs REST calls the way Laravel does, and, with a
-real Redis, covers cross-node delivery, a node dying, Redis being flushed and
-Redis being unreachable.
+Early (0.x), and in use in a real chat application. The test suite starts real
+nodes on real sockets, speaks the WebSocket protocol to them, signs REST calls,
+and, with a real Redis, covers cross-node delivery, a node dying, Redis being
+flushed and Redis being unreachable. The chat example is also tested end to end
+in a real browser with `pusher-js` 8.
 
-Not verified yet: behaviour at load, and Elixir versions other than the one CI uses. The
-batch, channel-list, retry, limit and metrics features are covered by tests
-only. Please test your own setup before relying on it, and report what you find.
+Not verified yet: behaviour at very large scale (see
+[Load testing](guides/load-testing.md) to measure your own), the Compose/nginx
+example, and Elixir versions other than the ones CI uses.
 
 Not implemented: user sign-in features and the users endpoints, durable webhook
 retries, per-IP limits, built-in TLS, Redis Cluster. Delivery is at-most-once,
-like Pusher. Details in
-[Protocol support](guides/protocol-support.md).
+like Pusher. Details in [Protocol support](guides/protocol-support.md).
 
 ## Development and contributing
 
 ```bash
 mix deps.get
-mix test            # Redis tests are skipped unless PUSHER_TEST_REDIS_URL is set
+mix test            # Redis tests are skipped unless SOCKETELX_TEST_REDIS_URL is set
 iex -S mix          # starts the listener on PORT (default 6001)
 ```
 
@@ -123,4 +171,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: see
 
 ## License
 
-MIT, see [LICENSE](https://github.com/femz12/pusher_server/blob/main/LICENSE).
+MIT, see [LICENSE](https://github.com/socketelx/socketelx/blob/main/LICENSE).

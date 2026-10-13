@@ -1,7 +1,7 @@
 # Protocol support
 
 The Pusher Channels protocol, as used by `pusher-js`, `laravel-echo` and the
-Pusher server SDKs. Only what is listed under "Supported" is implemented;
+official Pusher server libraries. Only what is listed under "Supported" is implemented;
 anything else is unsupported.
 
 ## Supported
@@ -23,7 +23,7 @@ anything else is unsupported.
 |---|---|
 | `GET /` | Health check, returns `ok` |
 | `POST /apps/:app_id/events` | Trigger an event on one or more channels |
-| `POST /apps/:app_id/batch_events` | Trigger up to 10 events, configurable with `PUSHER_BATCH_LIMIT` (`{"batch": [{channel, name, data, socket_id?}]}`) |
+| `POST /apps/:app_id/batch_events` | Trigger up to 10 events, configurable with `SOCKETELX_BATCH_LIMIT` (`{"batch": [{channel, name, data, socket_id?}]}`) |
 | `GET /apps/:app_id/channels` | List occupied channels. `filter_by_prefix`, and `info=user_count` with `filter_by_prefix=presence-` |
 | `GET /apps/:app_id/channels/:channel` | Occupancy and subscription count (and `user_count` for presence channels) |
 | `GET /metrics` | Prometheus metrics, off unless enabled; see [Configuration](configuration.md#metrics) |

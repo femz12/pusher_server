@@ -15,12 +15,12 @@ Only the latest 0.x release receives fixes.
 
 ## Deployment notes
 
-- Always set your own `PUSHER_APP_SECRET`. The built-in default is public.
+- Always set your own `SOCKETELX_APP_SECRET`. The built-in default is public.
 - The server speaks plain HTTP/WS. Terminate TLS in front of it.
 - The REST API is protected by request signatures. An optional per-instance rate
-  limit exists (`PUSHER_REST_RATE_LIMIT`), off by default. Do not expose the API
+  limit exists (`SOCKETELX_REST_RATE_LIMIT`), off by default. Do not expose the API
   to the internet unless you need to.
-- `/metrics` is off by default. If you enable it, set `PUSHER_METRICS_TOKEN` or
+- `/metrics` is off by default. If you enable it, set `SOCKETELX_METRICS_TOKEN` or
   block the path at your proxy.
 - Redis (multi-server mode) holds channel names and presence data including
   user info. Protect it with a password or network rules, and use `rediss://`
