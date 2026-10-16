@@ -18,7 +18,7 @@ defmodule ChatEmbedded.MixProject do
   defp deps do
     [
       # trigger/5 and authorize_channel/4 need socketelx 0.2 or newer
-      {:socketelx, "~> 0.2"},
+      {:socketelx, "~> 0.3"},
       {:plug_cowboy, "~> 2.7"},
       {:jason, "~> 1.4"}
     ]

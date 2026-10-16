@@ -107,7 +107,7 @@ and one line in `application.ex` that adds `{Socketelx, name: Chat.Socketelx, ..
 to the supervision tree. In a Phoenix app, put that line in your own supervision
 tree and call the two functions from your controllers or LiveViews.
 
-`mix.exs` depends on `socketelx` `~> 0.2` from Hex. To develop against a local
+`mix.exs` depends on `socketelx` `~> 0.3` from Hex. To develop against a local
 checkout, use `{:socketelx, path: "../../.."}` instead.
 
 ## Making it your own

@@ -38,6 +38,38 @@ It works with the clients and libraries you probably already use: `pusher-js`,
 `laravel-echo`, and the official Pusher server SDKs (Node, PHP, Python, Ruby,
 Go and others).
 
+## Why Elixir for this
+
+A WebSocket server spends its life holding thousands of mostly idle connections
+and pushing small messages to many of them at once. That is what the Erlang VM
+(BEAM) was built for, and it shows in how Socketelx behaves:
+
+- **One tiny process per connection.** Each client is isolated. A client that
+  misbehaves or crashes takes down only itself, never its neighbours.
+- **Every CPU core, from one process.** The VM runs a scheduler per core, so a
+  single node uses the whole machine. Servers built on a single-threaded event
+  loop (Node, ReactPHP) use one core per process and need several processes, plus
+  a shared store, to use the rest.
+- **Fair scheduling.** The VM pre-empts work, so one busy channel or slow
+  client cannot hold up everyone else, and latency stays even under load.
+- **Supervision.** Parts of the server restart on their own when they fail,
+  without restarting the whole server or dropping the other connections.
+- **Clustering is built in.** Nodes can join up without any extra service. That
+  is what the experimental Erlang cluster mode uses.
+- **Clean restarts.** On shutdown the server tells clients to reconnect before it
+  exits, so a rolling deploy is a blip, not an outage.
+
+For comparison, a Laravel Reverb server is a PHP process around a single event
+loop, and growing past one process means running more of them with Redis in
+between.
+
+Those are properties of the platform. What we have actually measured is modest:
+on one small machine, with the load generator on the same host, 1,000
+connections received 100% of 25,000 messages at a p99 latency of about 6 ms. We
+have **not** run a head-to-head against Reverb or Soketi, so no speed claim is
+made here. [`bench/load.mjs`](guides/load-testing.md) is included so you can
+measure on your own hardware and your own traffic.
+
 ## Quickstart: Docker
 
 ```bash
@@ -86,7 +118,7 @@ the whole thing.
 
 ```elixir
 # mix.exs
-{:socketelx, "~> 0.2"}
+{:socketelx, "~> 0.3"}
 
 # lib/my_app/application.ex
 children = [
