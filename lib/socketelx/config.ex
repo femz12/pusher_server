@@ -21,6 +21,10 @@ defmodule Socketelx.Config do
   | `:client_messages_enabled` | `SOCKETELX_ENABLE_CLIENT_MESSAGES` | `true`       |
   | `:redis_url`               | `SOCKETELX_REDIS_URL`              | none (single node) |
   | `:redis_opts`              | —                               | `[]` (extra `Redix` options, e.g. `ssl: true`) |
+  | `:cluster`                | `SOCKETELX_CLUSTER`                | none (set to `erlang` for the experimental Redis-free cluster mode) |
+  | `:cluster_nodes`           | `SOCKETELX_CLUSTER_NODES`          | none (comma-separated Erlang node names to connect to, e.g. `socketelx@host1,socketelx@host2`) |
+  | `:cluster_dns`             | `SOCKETELX_CLUSTER_DNS`            | none (a hostname resolving to every peer; nodes are named `<basename>@<ip>`) |
+  | `:cluster_node_basename`   | `SOCKETELX_CLUSTER_NODE_BASENAME`  | `"socketelx"` (the part before `@` when using `:cluster_dns`) |
   | `:webhook_retries`         | `SOCKETELX_WEBHOOK_RETRIES`        | `3` (retries after the first attempt; `0` disables) |
   | `:webhook_retry_base_ms`   | —                               | `1000` (delay doubles on each retry) |
   | `:rest_rate_limit`         | `SOCKETELX_REST_RATE_LIMIT`        | none (max REST API requests per second, per instance) |
@@ -31,8 +35,11 @@ defmodule Socketelx.Config do
   | `:metrics_token`           | `SOCKETELX_METRICS_TOKEN`          | none (if set, `/metrics` requires `Authorization: Bearer <token>`) |
 
   Setting `:redis_url` switches the instance to the Redis backend so
-  several nodes can share channels, presence and broadcasts. Without it,
-  the instance runs fully in-memory and needs nothing but this library.
+  several nodes can share channels, presence and broadcasts. Setting
+  `cluster: :erlang` does the same over Erlang's own clustering with no Redis
+  (experimental, see `Socketelx.Backend.Distributed`). Without either, the
+  instance runs fully in-memory and needs nothing but this library. Setting
+  both is an error.
   """
 
   require Logger
@@ -49,6 +56,10 @@ defmodule Socketelx.Config do
     :backend,
     :redis_url,
     :redis_opts,
+    :cluster,
+    :cluster_nodes,
+    :cluster_dns,
+    :cluster_node_basename,
     :node_id,
     :prefix,
     :webhook_retries,
@@ -68,6 +79,12 @@ defmodule Socketelx.Config do
   def resolve(name, opts) do
     app_id = Keyword.get(opts, :app_id) || env("APP_ID", "app-id")
     redis_url = Keyword.get(opts, :redis_url) || blank_to_nil(env("REDIS_URL"))
+    cluster = parse_cluster(Keyword.get(opts, :cluster) || blank_to_nil(env("CLUSTER")))
+
+    if redis_url && cluster do
+      raise ArgumentError,
+            "Socketelx[#{inspect(name)}]: set either a Redis URL or `cluster: :erlang`, not both"
+    end
 
     config = %__MODULE__{
       app_key: Keyword.get(opts, :app_key) || env("APP_KEY", "app-key"),
@@ -77,9 +94,21 @@ defmodule Socketelx.Config do
       webhook_url: Keyword.get(opts, :webhook_url) || env("WEBHOOK_URL"),
       client_messages_enabled:
         Keyword.get(opts, :client_messages_enabled, env_client_messages_enabled?()),
-      backend: if(redis_url, do: Socketelx.Backend.Redis, else: Socketelx.Backend.Local),
+      backend:
+        cond do
+          redis_url -> Socketelx.Backend.Redis
+          cluster == :erlang -> Socketelx.Backend.Distributed
+          true -> Socketelx.Backend.Local
+        end,
       redis_url: redis_url,
       redis_opts: Keyword.get(opts, :redis_opts, []),
+      cluster: cluster,
+      cluster_nodes:
+        parse_nodes(Keyword.get(opts, :cluster_nodes) || blank_to_nil(env("CLUSTER_NODES"))),
+      cluster_dns: Keyword.get(opts, :cluster_dns) || blank_to_nil(env("CLUSTER_DNS")),
+      cluster_node_basename:
+        Keyword.get(opts, :cluster_node_basename) || blank_to_nil(env("CLUSTER_NODE_BASENAME")) ||
+          "socketelx",
       # Unique per start of this instance. Lets nodes tell their own
       # pub/sub messages apart from other nodes', and lets the cluster
       # notice (via a heartbeat key) when a node has died.
@@ -130,6 +159,25 @@ defmodule Socketelx.Config do
       value -> to_int(value)
     end
   end
+
+  defp parse_cluster(nil), do: nil
+  defp parse_cluster(:erlang), do: :erlang
+  defp parse_cluster("erlang"), do: :erlang
+
+  defp parse_cluster(other) do
+    raise ArgumentError,
+          "unknown cluster mode #{inspect(other)}; the only supported value is :erlang"
+  end
+
+  defp parse_nodes(nil), do: []
+  defp parse_nodes(list) when is_list(list), do: Enum.map(list, &to_node/1)
+
+  defp parse_nodes(string) when is_binary(string) do
+    string |> String.split(",", trim: true) |> Enum.map(&String.trim/1) |> Enum.map(&to_node/1)
+  end
+
+  defp to_node(node) when is_atom(node), do: node
+  defp to_node(node) when is_binary(node), do: String.to_atom(node)
 
   defp to_int(nil), do: nil
   defp to_int(value) when is_integer(value), do: value

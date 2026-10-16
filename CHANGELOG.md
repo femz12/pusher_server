@@ -6,6 +6,16 @@ follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **Experimental:** Erlang cluster mode (`cluster: :erlang` /
+  `SOCKETELX_CLUSTER=erlang`). Several nodes share events, presence, channel
+  occupancy and webhooks over Erlang's own clustering, with no Redis. Nodes can
+  find each other from `SOCKETELX_CLUSTER_NODES` or `SOCKETELX_CLUSTER_DNS`, or
+  use a cluster your app already has. Survives a node dying, the leader dying
+  and a network split that later heals. Tested across real separate nodes.
+  See the Multi-server guide for setup and limits.
+- `docker-compose.cluster.example.yml`, a two-node example with no Redis.
+
 ## [0.2.0]
 
 ### Changed (breaking)

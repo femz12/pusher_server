@@ -10,6 +10,9 @@ defmodule Socketelx.Backend do
     * `Socketelx.Backend.Redis` — shares broadcasts, presence and channel
       occupancy between nodes through Redis. Enabled by setting
       `:redis_url` / `SOCKETELX_REDIS_URL`.
+    * `Socketelx.Backend.Distributed` — **experimental.** Shares the same state
+      over Erlang's own clustering, with no Redis. Enabled by `cluster: :erlang`
+      / `SOCKETELX_CLUSTER=erlang`.
 
   Callers don't use a backend directly — they go through `Socketelx.Cluster`.
   """

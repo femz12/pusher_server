@@ -2,7 +2,7 @@ defmodule Socketelx.MixProject do
   use Mix.Project
 
   @source_url "https://github.com/socketelx/socketelx"
-  @version "0.2.3"
+  @version "0.3.0"
 
   def project do
     [
@@ -88,8 +88,14 @@ defmodule Socketelx.MixProject do
       groups_for_modules: [
         "Public API": [Socketelx],
         Configuration: [Socketelx.Config],
-        Backends: [Socketelx.Backend, Socketelx.Backend.Local, Socketelx.Backend.Redis],
-        Internals: ~r/^Socketelx\.(?!Backend$|Backend\.Local$|Backend\.Redis$|Config$)/
+        Backends: [
+          Socketelx.Backend,
+          Socketelx.Backend.Local,
+          Socketelx.Backend.Redis,
+          Socketelx.Backend.Distributed
+        ],
+        Internals:
+          ~r/^Socketelx\.(?!Backend$|Backend\.Local$|Backend\.Redis$|Backend\.Distributed$|Config$)/
       ]
     ]
   end

@@ -5,7 +5,7 @@ Add the dependency:
 ```elixir
 # mix.exs
 defp deps do
-  [{:socketelx, "~> 0.2"}]
+  [{:socketelx, "~> 0.3"}]
 end
 ```
 
@@ -105,3 +105,12 @@ already gone and the sockets are already closed.
 
 Pass `redis_url: "redis://..."` to share state between several nodes. See
 [Multi-server](multi-server.md).
+
+## Without Redis (experimental)
+
+If your application already runs as a cluster of Erlang nodes, pass
+`cluster: :erlang` instead and Socketelx shares events, presence and channel
+occupancy over that cluster, with no Redis. Give every node the same `app_id`
+and make sure the nodes can reach each other. This mode is experimental; the
+[Multi-server guide](multi-server.md#without-redis-erlang-cluster-experimental)
+has the details and the limits.

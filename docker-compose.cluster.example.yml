@@ -1,0 +1,47 @@
+# Two Socketelx nodes sharing state over Erlang clustering, with no Redis,
+# behind the same nginx load balancer as docker-compose.example.yml.
+#
+# EXPERIMENTAL. See guides/multi-server.md ("Without Redis") for how it works
+# and its limits.
+#
+#   CLUSTER_COOKIE=$(openssl rand -hex 32) \
+#     docker compose -f docker-compose.cluster.example.yml up --build
+#
+# Point your backend and your browser client at the `lb` service (port 6001).
+#
+# The cookie is the only thing that authenticates nodes to each other, so it
+# must be a long random secret and the same on every node. Do not publish the
+# Erlang ports (4369 and the distribution ports) outside the Docker network.
+
+x-socketelx: &socketelx
+  build: .
+  # or, once you publish the image: ghcr.io/socketelx/socketelx:latest
+  environment: &socketelx-env
+    SOCKETELX_APP_ID: app-id
+    SOCKETELX_APP_KEY: app-key
+    SOCKETELX_APP_SECRET: app-secret
+    PORT: "6001"
+    SOCKETELX_CLUSTER: erlang
+    # Short node names are `socketelx@<hostname>`; each service sets its hostname.
+    SOCKETELX_CLUSTER_NODES: socketelx@socketelx-1,socketelx@socketelx-2
+    RELEASE_COOKIE: ${CLUSTER_COOKIE:?set CLUSTER_COOKIE to a long random secret}
+  stop_grace_period: 10s
+
+services:
+  socketelx-1:
+    <<: *socketelx
+    hostname: socketelx-1
+
+  socketelx-2:
+    <<: *socketelx
+    hostname: socketelx-2
+
+  lb:
+    image: nginx:1.27-alpine
+    ports:
+      - "6001:80"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - socketelx-1
+      - socketelx-2

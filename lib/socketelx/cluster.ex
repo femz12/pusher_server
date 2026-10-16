@@ -68,18 +68,31 @@ defmodule Socketelx.Cluster do
   def presence_restore(name, channel, socket_id, user_id, user_info),
     do: backend(name).presence_restore(name, channel, socket_id, user_id, user_info)
 
-  @doc "Tells the cluster (and the webhook, if configured) that a user joined a presence channel."
-  def announce_member_added(name, channel, user_id, user_info, exclude_socket_id) do
-    broadcast(
-      name,
-      channel,
-      %{
-        event: "pusher_internal:member_added",
-        channel: channel,
-        data: Jason.encode!(%{user_id: user_id, user_info: user_info})
-      },
-      exclude_socket_id
-    )
+  @doc false
+  def member_added_json(channel, user_id, user_info) do
+    Jason.encode!(%{
+      event: "pusher_internal:member_added",
+      channel: channel,
+      data: Jason.encode!(%{user_id: user_id, user_info: user_info})
+    })
+  end
+
+  @doc false
+  def member_removed_json(channel, user_id) do
+    Jason.encode!(%{
+      event: "pusher_internal:member_removed",
+      channel: channel,
+      data: Jason.encode!(%{user_id: user_id})
+    })
+  end
+
+  @doc """
+  Tells the cluster (and the webhook, if configured) that a user joined a
+  presence channel. `exclude` is a socket id, `{:user, channel, user_id}` to
+  skip every socket of that user on that channel, or `nil`.
+  """
+  def announce_member_added(name, channel, user_id, user_info, exclude) do
+    broadcast(name, channel, member_added_json(channel, user_id, user_info), exclude)
 
     Webhook.dispatch(name, [
       %{"name" => "member_added", "channel" => channel, "user_id" => user_id}
@@ -88,11 +101,7 @@ defmodule Socketelx.Cluster do
 
   @doc "Tells the cluster (and the webhook, if configured) that a user's last connection left a presence channel."
   def announce_member_removed(name, channel, user_id) do
-    broadcast(name, channel, %{
-      event: "pusher_internal:member_removed",
-      channel: channel,
-      data: Jason.encode!(%{user_id: user_id})
-    })
+    broadcast(name, channel, member_removed_json(channel, user_id))
 
     Webhook.dispatch(name, [
       %{"name" => "member_removed", "channel" => channel, "user_id" => user_id}

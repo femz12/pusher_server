@@ -2,7 +2,22 @@
 
 One node is enough for many applications and needs no other service. Run
 several nodes when you need more capacity or want to restart without
-disconnecting everyone at once. They coordinate through a single Redis.
+disconnecting everyone at once. There are two ways to let nodes share events,
+presence and channel occupancy:
+
+| | Redis (this page, first half) | Erlang cluster (second half) |
+|---|---|---|
+| Status | Stable. Recommended. | **Experimental.** |
+| Needs | A Redis server | Nodes that can reach each other over Erlang distribution |
+| Best for | Any backend language, Docker, most setups | Elixir teams who already cluster their nodes, or who want no Redis |
+| Scale | Tested with the Redis failure cases below | Suits tens of thousands of connections; see its limits below |
+
+Use one or the other, never both: setting a Redis URL and `cluster: :erlang`
+together is rejected at startup.
+
+## With Redis
+
+Nodes coordinate through a single Redis.
 
 ## Setup
 
@@ -59,3 +74,102 @@ Embedded: `{Socketelx, name: MyApp.Socketelx, redis_url: "redis://localhost:6379
 Connect a client to node 1, send an event through node 2's REST endpoint, and
 confirm the client receives it. Then stop a node and restart Redis and confirm
 clients and presence recover.
+
+## Without Redis: Erlang cluster (experimental)
+
+> **Experimental.** It passes automated tests across real separate nodes, but
+> it has seen far less real-world use than the Redis mode. Try it on staging,
+> read the limits below, and prefer Redis for anything critical. Its behaviour
+> and settings may still change before 1.0.
+
+Elixir and Erlang nodes can talk to each other directly, so Socketelx can
+share state with no extra service. Turn it on and tell the nodes about each
+other:
+
+```bash
+SOCKETELX_CLUSTER=erlang
+```
+
+or, embedded, `{Socketelx, name: MyApp.Socketelx, cluster: :erlang, ...}`.
+
+Every node needs the same app id, key and secret, as with Redis.
+
+### Standalone (Docker)
+
+The image is an Elixir release, so the Erlang node settings are the usual
+release variables. On every node:
+
+| Variable | What to set |
+|---|---|
+| `SOCKETELX_CLUSTER` | `erlang` |
+| `RELEASE_COOKIE` | The **same long random secret on every node** (for example `openssl rand -hex 32`). It is the only thing that authenticates nodes to each other. |
+| `RELEASE_NODE` / `RELEASE_DISTRIBUTION` | The node's own name. The default (`socketelx@<hostname>`, short names) works when each node has a resolvable hostname, as in the Compose example. Use `RELEASE_DISTRIBUTION=name` with `RELEASE_NODE=socketelx@<ip-or-fqdn>` when nodes find each other by IP. |
+| `SOCKETELX_CLUSTER_NODES` | Comma-separated names of the other nodes, for example `socketelx@socketelx-1,socketelx@socketelx-2`. |
+| `SOCKETELX_CLUSTER_DNS` | Alternative to the list: a hostname that resolves to every node's IP (a Kubernetes headless service, a Docker Swarm `tasks.<service>` name). Nodes are then expected to be named `socketelx@<ip>`, so set `RELEASE_DISTRIBUTION=name` and `RELEASE_NODE=socketelx@$POD_IP`. Change the part before the `@` with `SOCKETELX_CLUSTER_NODE_BASENAME`. |
+
+A ready-to-run two-node example without Redis is in
+`docker-compose.cluster.example.yml`:
+
+```bash
+CLUSTER_COOKIE=$(openssl rand -hex 32) docker compose -f docker-compose.cluster.example.yml up --build
+```
+
+Nodes keep retrying every few seconds, so start order does not matter.
+
+### Embedded
+
+If your application already forms a cluster (for example a Phoenix app with
+`dns_cluster` or `libcluster`), add `cluster: :erlang` to the Socketelx child
+spec and you are done. Otherwise pass `cluster_nodes: [:"app@host1", ...]` or
+`cluster_dns: "my-app.internal"`. The application must be started as a named
+node (`--sname` / `--name`, or as a release).
+
+### What is shared
+
+The same as with Redis: events reach every node, presence and the
+`member_added` / `member_removed` / `channel_occupied` / `channel_vacated`
+webhooks fire once for the whole cluster, and the channel list and counts cover
+all nodes. Rate limits, the connection cap and metrics stay per node.
+
+### How it works
+
+- **Events** are delivered to the sender's own sockets, then sent straight to
+  the other nodes. There is no central point in the path.
+- **Presence and occupancy** are decided by one *leader* node (the same one
+  every node picks, with no voting) so a user's first and last connection are
+  recognised exactly once. Every other node keeps a standby copy.
+
+### When things fail
+
+| What happens | Result |
+|---|---|
+| A node is stopped cleanly | Clients are told to reconnect; the leader announces what left. |
+| A node is killed or loses its network | The leader drops what that node owned and announces the departures once, as soon as Erlang notices the node is gone. |
+| The leader's node dies | The next node takes over from its standby copy, asks every node what it owns, and announces only the differences. Presence changes wait briefly (about two seconds) for the new leader; events between surviving nodes keep flowing. |
+| The network splits in two | Each side keeps working on its own with its own leader. When it heals, the sides are merged: clients and webhooks are told what each side missed. |
+
+### Limits
+
+- **Throughput of presence.** The leader handles every subscribe, unsubscribe
+  and presence change in the cluster. That suits tens of thousands of
+  connections, not millions. Use Redis if you need the most headroom.
+- **Failure detection time.** A node that vanishes without closing its
+  connection is noticed after Erlang's `net_ticktime` (60 s by default). Lower
+  it with `ERL_AFLAGS="-kernel net_ticktime 15"` for faster cleanup.
+- **Security.** Erlang distribution trusts anyone with the cookie, and a node
+  with the cookie can run any code. Never publish port 4369 or the distribution
+  ports (restrict them with `ERL_AFLAGS="-kernel inet_dist_listen_min 9100
+  inet_dist_listen_max 9105"`), keep them on a private network, and set
+  `RELEASE_COOKIE` yourself. The cookie baked into a public image is not a
+  secret.
+- **Rolling deploys.** Nodes running different Socketelx versions may not agree
+  on the cluster protocol. Upgrade all nodes together, or accept a short period
+  of inconsistent presence.
+- Delivery is at-most-once, like Pusher itself.
+
+### Checking it works
+
+Start two nodes, connect a client to one and trigger an event through the
+other. To see the cluster itself, open a shell on a node
+(`docker compose exec socketelx-1 bin/socketelx remote`) and run `Node.list()`;
+it should list the other nodes.

@@ -26,4 +26,10 @@ defmodule Socketelx.Naming do
   def redis_subscriber(name), do: Module.concat(name, RedisSubscriber)
   @doc false
   def redis_janitor(name), do: Module.concat(name, RedisJanitor)
+
+  # Distributed (Erlang cluster) backend processes
+  @doc false
+  def dist_member(name), do: Module.concat(name, DistMember)
+  @doc false
+  def dist_relay(name), do: Module.concat(name, DistRelay)
 end

@@ -70,6 +70,25 @@ body hash or timestamp is wrong.
 - **Ghost members** for 30 to 40 seconds after a node was killed: expected. The
   surviving nodes clean up once the dead node's heartbeat expires.
 
+### Erlang cluster mode (experimental)
+
+- **Nodes do not see each other.** In a shell on a node (`bin/socketelx remote`)
+  run `Node.list()`. If it is empty: is the node distributed (check for a
+  warning at startup about not being distributed)? Do all nodes share the same
+  `RELEASE_COOKIE`? Can they resolve and reach each other's hostnames, and the
+  ports 4369 and the distribution port range?
+- **A node name does not match.** With the default short names a node is
+  `socketelx@<hostname>`; with `RELEASE_DISTRIBUTION=name` it is
+  `socketelx@<what you set>`. `SOCKETELX_CLUSTER_NODES` must use exactly those
+  names.
+- **Events reach clients on one node only.** Check the app id: the nodes only
+  join up when `SOCKETELX_APP_ID` is the same everywhere.
+- **Ghost members after a hard crash.** Erlang notices a vanished node after
+  `net_ticktime` (60 s by default); lower it with
+  `ERL_AFLAGS="-kernel net_ticktime 15"`.
+- **Startup fails with "set either a Redis URL or `cluster: :erlang`".** Use one
+  mode, not both.
+
 ## Limits and metrics
 
 - **REST calls fail with 429**: `SOCKETELX_REST_RATE_LIMIT` is lower than your

@@ -2,5 +2,22 @@
 # (CI does; locally: `docker run -p 6379:6379 redis:7` and
 # `SOCKETELX_TEST_REDIS_URL=redis://localhost:6379/15 mix test`).
 # They are skipped otherwise, so `mix test` always works with no services.
-exclude = if System.get_env("SOCKETELX_TEST_REDIS_URL"), do: [], else: [:redis]
+#
+# The peer tests start real separate Erlang nodes, which needs this VM to be
+# distributed (epmd running). If that can't be arranged they are skipped.
+distributed? =
+  Node.alive?() or
+    try do
+      System.cmd("epmd", ["-daemon"], stderr_to_stdout: true)
+      match?({:ok, _}, Node.start(:"socketelx_test@127.0.0.1", :longnames))
+    rescue
+      _ -> false
+    catch
+      _, _ -> false
+    end
+
+exclude =
+  if(System.get_env("SOCKETELX_TEST_REDIS_URL"), do: [], else: [:redis]) ++
+    if(distributed?, do: [], else: [:peer])
+
 ExUnit.start(exclude: exclude)

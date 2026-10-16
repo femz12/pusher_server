@@ -18,12 +18,16 @@ defmodule Socketelx.Application do
 
   @impl true
   def start(_type, _args) do
+    # The process-group scope the Erlang cluster backend uses. It lives here,
+    # not under any one instance, so stopping an instance never takes the
+    # others' group memberships with it. Costs nothing when that backend is off.
     children =
-      if Application.get_env(:socketelx, :standalone?, false) do
-        [{Socketelx, name: Socketelx}]
-      else
-        []
-      end
+      [%{id: :socketelx_pg, start: {:pg, :start_link, [Socketelx.Backend.Distributed.scope()]}}] ++
+        if Application.get_env(:socketelx, :standalone?, false) do
+          [{Socketelx, name: Socketelx}]
+        else
+          []
+        end
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Socketelx.RootSupervisor)
   end

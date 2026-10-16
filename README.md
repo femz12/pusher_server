@@ -10,7 +10,8 @@ Run it two ways, from the same code:
 - **Standalone:** a Docker image you run next to your app.
 - **Embedded:** a Hex dependency inside your own Elixir/Phoenix app.
 
-It runs on one server with nothing else, or on several servers sharing a Redis.
+It runs on one server with nothing else, or on several servers sharing a Redis
+(or, experimentally, over Erlang clustering with no Redis).
 
 > Socketelx is an independent open-source project. It implements the public Pusher
 > Channels protocol so existing Pusher clients and libraries work with it. It is
@@ -29,7 +30,8 @@ to browsers and phones as they happen.
 - REST API: trigger events, batch events, list channels, channel info
 - Signed webhooks with retries
 - Optional rate limits, connection cap, and Prometheus metrics
-- Multi-server mode through Redis (optional)
+- Multi-server mode through Redis (optional), or Erlang clustering with no
+  Redis (**experimental**)
 - Graceful shutdown: clients are told to reconnect before a node exits
 
 It works with the clients and libraries you probably already use: `pusher-js`,
@@ -127,15 +129,21 @@ a step-by-step setup.
 
 Give every node the same app credentials and the same `SOCKETELX_REDIS_URL`, and
 put a load balancer in front. Events, presence and channel occupancy are shared.
-Without `SOCKETELX_REDIS_URL` no Redis connection is ever opened. See the
-[Multi-server guide](guides/multi-server.md).
+Without `SOCKETELX_REDIS_URL` no Redis connection is ever opened.
+
+Prefer no Redis? Set `SOCKETELX_CLUSTER=erlang` instead and the nodes share
+state over Erlang's own clustering. **This mode is experimental**: it is tested
+across real nodes, including crashes and network splits, but it is newer and
+has had less real-world use than the Redis mode. See the
+[Multi-server guide](guides/multi-server.md) for setup, limits and security.
+
 
 ## Documentation
 
 - [Getting started](guides/getting-started.md): run it and connect a client
 - [Configuration](guides/configuration.md): every option and environment variable
 - [Embedding](guides/embedding.md): use it as a library
-- [Multi-server](guides/multi-server.md): Redis and failure behaviour
+- [Multi-server](guides/multi-server.md): Redis, the experimental Erlang cluster mode, and failure behaviour
 - [Deployment](guides/deployment.md): TLS, proxies, Docker, shutdown
 - [Load testing](guides/load-testing.md): simulate connections and measure capacity
 - [Protocol support](guides/protocol-support.md): what is and isn't implemented
@@ -149,6 +157,9 @@ nodes on real sockets, speaks the WebSocket protocol to them, signs REST calls,
 and, with a real Redis, covers cross-node delivery, a node dying, Redis being
 flushed and Redis being unreachable. The chat example is also tested end to end
 in a real browser with `pusher-js` 8.
+
+Experimental: the Erlang cluster mode (`SOCKETELX_CLUSTER=erlang`). Do not use
+it as your only safeguard for anything critical until it has more miles on it.
 
 Not verified yet: behaviour at very large scale (see
 [Load testing](guides/load-testing.md) to measure your own), the Compose/nginx

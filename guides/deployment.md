@@ -75,6 +75,9 @@ node, they reconnect when it is back.
 `docker-compose.example.yml` runs two nodes, Redis and nginx. For one node,
 keep a single `socketelx-1` service and drop `SOCKETELX_REDIS_URL`.
 
+`docker-compose.cluster.example.yml` is the same two nodes with no Redis, using
+the experimental Erlang cluster mode. See [Multi-server](multi-server.md).
+
 ## Checklist
 
 1. Set your own `SOCKETELX_APP_SECRET`.

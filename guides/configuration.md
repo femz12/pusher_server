@@ -26,7 +26,15 @@ existing deployment keeps working; if both are set, `SOCKETELX_*` wins.
 | `:batch_limit`             | `SOCKETELX_BATCH_LIMIT`            | `10`               | Max events in one `batch_events` request. Pusher's own limit is 10. |
 | `:metrics`                 | `SOCKETELX_METRICS`                | `false`            | Serve Prometheus metrics at `GET /metrics`. |
 | `:metrics_token`           | `SOCKETELX_METRICS_TOKEN`          | none               | Require `Authorization: Bearer <token>` on `/metrics`. |
+| `:cluster`                 | `SOCKETELX_CLUSTER`                | none               | `erlang` turns on the experimental Redis-free cluster mode. Not combinable with `:redis_url`. See [Multi-server](multi-server.md). |
+| `:cluster_nodes`           | `SOCKETELX_CLUSTER_NODES`          | none               | Comma-separated Erlang node names to connect to (`socketelx@host1,socketelx@host2`). Optional if your app already forms a cluster. |
+| `:cluster_dns`             | `SOCKETELX_CLUSTER_DNS`            | none               | A hostname that resolves to every node's IP; nodes are named `<basename>@<ip>`. |
+| `:cluster_node_basename`   | `SOCKETELX_CLUSTER_NODE_BASENAME`  | `socketelx`        | The part before the `@` used with `:cluster_dns`. |
 | `:name`                    | none                            | `Socketelx`     | Embedded only. Unique per instance. |
+
+In Docker, cluster mode also uses the release's own variables, which are not
+Socketelx settings: `RELEASE_COOKIE` (shared secret, required in practice),
+`RELEASE_NODE` and `RELEASE_DISTRIBUTION`. See [Multi-server](multi-server.md).
 
 ## One app per instance
 

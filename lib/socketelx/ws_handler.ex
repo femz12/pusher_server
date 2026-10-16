@@ -101,8 +101,8 @@ defmodule Socketelx.WsHandler do
 
   # Delivery from the HTTP trigger endpoint, a client event, or another node
   @impl :cowboy_websocket
-  def websocket_info({:broadcast, message, exclude_socket_id}, state) do
-    if state.socket_id == exclude_socket_id do
+  def websocket_info({:broadcast, message, exclude}, state) do
+    if excluded?(state, exclude) do
       {:ok, state}
     else
       {:reply, {:text, message}, state}
@@ -379,6 +379,14 @@ defmodule Socketelx.WsHandler do
     do: Jason.encode!(%{event: "pusher:error", data: %{message: message, code: code}})
 
   defp private?(channel), do: String.starts_with?(channel, "private-")
+  # `exclude` is a socket id, `nil`, or `{:user, channel, user_id}`: every socket
+  # that joined `channel` as that user (used so a user is never told about
+  # their own arrival when the cluster re-announces members after a merge).
+  defp excluded?(state, {:user, channel, user_id}),
+    do: match?({^user_id, _info}, Map.get(state.presence, channel))
+
+  defp excluded?(state, exclude_socket_id), do: state.socket_id == exclude_socket_id
+
   defp presence?(channel), do: String.starts_with?(channel, "presence-")
 
   defp generate_socket_id do
