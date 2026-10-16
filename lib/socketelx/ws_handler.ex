@@ -14,7 +14,7 @@ defmodule Socketelx.WsHandler do
   """
   @behaviour :cowboy_websocket
 
-  alias Socketelx.{Auth, Cluster, Config, Metrics, Naming, Webhook}
+  alias Socketelx.{Apps, Auth, Cluster, Config, Metrics, Naming, RateLimiter, Webhook}
 
   @all_connections :__all_connections__
   # Clients are told to ping after this many seconds of silence. The server
@@ -27,18 +27,30 @@ defmodule Socketelx.WsHandler do
   # ---- cowboy_websocket callbacks ----
 
   @impl :cowboy_websocket
-  def init(req, %{name: name}) do
+  def init(req, %{name: root}) do
     app_key = :cowboy_req.binding(:app_key, req)
+    instance = Apps.by_key(root, app_key)
+    # `name` is the instance of the app this key belongs to (the server's own
+    # name when it serves a single app); everything below is per app.
+    name = instance || root
 
-    # An unknown app key is reported the way the Pusher protocol specifies:
-    # accept the upgrade, send `pusher:error` 4001, close. (Replying with a
-    # plain HTTP error would make clients retry instead of surfacing it.)
-    reject = if Config.valid_app_key?(name, app_key), do: nil, else: 4001
-
-    reject = reject || if(over_capacity?(name), do: 4004)
+    # A refused connection is reported the way the Pusher protocol specifies:
+    # accept the upgrade, send `pusher:error`, close. (Replying with a plain
+    # HTTP error would make clients retry instead of surfacing it.)
+    reject =
+      cond do
+        is_nil(instance) -> 4001
+        not Config.origin_allowed?(name, origin(req)) -> 4009
+        over_capacity?(name) -> 4004
+        true -> nil
+      end
 
     state = %{
       name: name,
+      ip: if(instance, do: client_ip(req, Config.get(name))),
+      ip_counted: false,
+      user_id: nil,
+      user_channel: nil,
       socket_id: nil,
       channels: MapSet.new(),
       presence: %{},
@@ -55,12 +67,27 @@ defmodule Socketelx.WsHandler do
     {:reply, [{:text, error_json("Application does not exist", 4001)}, :close], state}
   end
 
+  def websocket_init(%{reject: 4009} = state) do
+    Metrics.incr(state.name, :connections_rejected_total)
+    {:reply, [{:text, error_json("Origin not allowed", 4009)}, :close], state}
+  end
+
   def websocket_init(%{reject: 4004} = state) do
     Metrics.incr(state.name, :connections_rejected_total)
     {:reply, [{:text, error_json("Over capacity", 4004)}, :close], state}
   end
 
   def websocket_init(state) do
+    if RateLimiter.ip_acquire(state.name, state.ip, Config.get(state.name).max_connections_per_ip) do
+      accept(%{state | ip_counted: true})
+    else
+      Metrics.incr(state.name, :connections_rejected_total)
+      msg = "Too many connections from your address"
+      {:reply, [{:text, error_json(msg, 4100)}, :close], state}
+    end
+  end
+
+  defp accept(state) do
     Metrics.incr(state.name, :connections_total)
     socket_id = generate_socket_id()
     # tracked separately from per-channel subscriptions so a graceful
@@ -84,6 +111,9 @@ defmodule Socketelx.WsHandler do
       {:ok, %{"event" => "pusher:unsubscribe", "data" => %{"channel" => channel}}}
       when is_binary(channel) ->
         handle_unsubscribe(channel, state)
+
+      {:ok, %{"event" => "pusher:signin", "data" => %{} = data}} ->
+        handle_signin(data, state)
 
       {:ok, %{"event" => "pusher:ping"}} ->
         {:reply, {:text, Jason.encode!(%{event: "pusher:pong", data: %{}})}, state}
@@ -139,8 +169,19 @@ defmodule Socketelx.WsHandler do
   def websocket_info(_other, state), do: {:ok, state}
 
   @impl :cowboy_websocket
-  def terminate(_reason, _partial_req, %{name: name, socket_id: socket_id, channels: channels}) do
+  def terminate(
+        _reason,
+        _partial_req,
+        %{name: name, socket_id: socket_id, channels: channels} = state
+      ) do
     registry = Naming.registry(name)
+    if state.ip_counted, do: RateLimiter.ip_release(name, state.ip)
+
+    # The per-user channel is internal: it never produces occupancy webhooks.
+    if state.user_channel do
+      Registry.unregister(registry, state.user_channel)
+      Cluster.channel_left(name, state.user_channel)
+    end
 
     Enum.each(channels, fn channel ->
       # Registry removes this pid's entries once the process actually exits,
@@ -155,6 +196,38 @@ defmodule Socketelx.WsHandler do
   end
 
   def terminate(_reason, _partial_req, _state), do: :ok
+
+  # ---- user sign-in ----
+
+  # pusher-js's `pusher.signin()`: the browser got `auth` + `user_data` from
+  # your auth endpoint (`Socketelx.authenticate_user/4`). Signing in lets you
+  # send events to one user on any of their connections by triggering the
+  # channel `#server-to-user-<id>`.
+  defp handle_signin(_data, %{user_id: user_id} = state) when not is_nil(user_id),
+    do: error_reply("Already signed in", state)
+
+  defp handle_signin(%{"auth" => auth, "user_data" => user_data}, state)
+       when is_binary(user_data) do
+    with true <- Auth.valid_signin?(state.name, state.socket_id, user_data, auth),
+         {:ok, %{"id" => id}} when is_binary(id) or is_integer(id) <- Jason.decode(user_data) do
+      user_id = to_string(id)
+      channel = "#server-to-user-" <> user_id
+      Registry.register(Naming.registry(state.name), channel, state.socket_id)
+      Cluster.channel_joined(state.name, channel)
+
+      reply =
+        Jason.encode!(%{
+          event: "pusher:signin_success",
+          data: Jason.encode!(%{user_data: user_data})
+        })
+
+      {:reply, {:text, reply}, %{state | user_id: user_id, user_channel: channel}}
+    else
+      _ -> {:reply, {:text, error_json("Invalid signature for sign-in", 4009)}, state}
+    end
+  end
+
+  defp handle_signin(_data, state), do: {:ok, state}
 
   # ---- subscribe/unsubscribe ----
 
@@ -362,6 +435,30 @@ defmodule Socketelx.WsHandler do
         count = if state.ce_window == now, do: state.ce_count + 1, else: 1
         {count <= limit, %{state | ce_window: now, ce_count: count}}
     end
+  end
+
+  # The browser's Origin header, or nil when absent (servers and apps don't send one).
+  defp origin(req) do
+    case :cowboy_req.header("origin", req) do
+      :undefined -> nil
+      value -> value
+    end
+  end
+
+  # The peer address, or the address a trusted proxy put in `:client_ip_header`
+  # (first entry of a comma-separated list such as X-Forwarded-For).
+  defp client_ip(req, %{client_ip_header: nil}), do: peer_ip(req)
+
+  defp client_ip(req, %{client_ip_header: header}) do
+    case :cowboy_req.header(header, req) do
+      :undefined -> peer_ip(req)
+      value -> value |> String.split(",") |> hd() |> String.trim()
+    end
+  end
+
+  defp peer_ip(req) do
+    {ip, _port} = :cowboy_req.peer(req)
+    ip |> :inet.ntoa() |> to_string()
   end
 
   defp over_capacity?(name) do

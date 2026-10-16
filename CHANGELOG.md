@@ -4,7 +4,27 @@ All notable changes to this project are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/), versioning
 follows [Semantic Versioning](https://semver.org/).
 
-## [0.3.0]
+## [0.4.0] - 2026-10-16
+
+### Added
+- **Several apps in one server** (`apps: [...]` / `SOCKETELX_APPS` JSON). Each app
+  has its own id, key, secret and settings, and is fully isolated (channels,
+  presence, webhooks, limits, metrics). Metrics gain an `app` label when there is
+  more than one app. Single-app setups are unchanged. `Socketelx.trigger/5` and
+  `authorize_channel/4` take `app:` on multi-app servers.
+- **Allowed origins** (`allowed_origins` / `SOCKETELX_ALLOWED_ORIGINS`): exact
+  origins, bare hosts and `*.` wildcards. Default is to accept every origin.
+  Refused connections get `pusher:error` 4009.
+- `GET /apps/:id/channels/:channel/users` (presence channel members).
+- User sign-in: `pusher:signin`, events to a user through
+  `#server-to-user-<id>`, and `Socketelx.authenticate_user/4`.
+- `max_connections_per_ip` and `client_ip_header` (error 4100).
+- `webhook_queue_path`: failed webhooks are kept on disk and sent again after a
+  restart.
+- Built-in TLS (`tls_certfile` / `tls_keyfile`).
+- Chat example demo GIF.
+
+## [0.3.0] - 2026-10-16
 
 ### Added
 - **Experimental:** Erlang cluster mode (`cluster: :erlang` /
@@ -16,7 +36,7 @@ follows [Semantic Versioning](https://semver.org/).
   See the Multi-server guide for setup and limits.
 - `docker-compose.cluster.example.yml`, a two-node example with no Redis.
 
-## [0.2.0]
+## [0.2.0] - 2026-10-09
 
 ### Changed (breaking)
 - **Renamed from `pusher_server` to Socketelx.** The Hex package, OTP app and release

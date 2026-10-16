@@ -16,8 +16,7 @@ defmodule Socketelx.FeaturesTest do
   defp start_node(extra \\ []) do
     name = :"feat_#{System.unique_integer([:positive])}"
 
-    opts =
-      [name: name, port: 0, app_id: @app, app_key: @key, app_secret: @secret] ++ extra
+    opts = [name: name, port: 0, app_id: @app, app_key: @key, app_secret: @secret] ++ extra
 
     start_supervised!(Supervisor.child_spec({Socketelx, opts}, id: name))
     {name, :ranch.get_port(Naming.listener(name))}

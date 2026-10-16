@@ -2,7 +2,7 @@ defmodule Socketelx.MixProject do
   use Mix.Project
 
   @source_url "https://github.com/socketelx/socketelx"
-  @version "0.3.0"
+  @version "0.4.0"
 
   def project do
     [
@@ -69,6 +69,7 @@ defmodule Socketelx.MixProject do
         "guides/getting-started.md",
         "guides/configuration.md",
         "guides/embedding.md",
+        "guides/multi-app.md",
         "guides/multi-server.md",
         "guides/deployment.md",
         "guides/protocol-support.md",

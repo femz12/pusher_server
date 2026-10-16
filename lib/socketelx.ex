@@ -29,6 +29,27 @@ defmodule Socketelx do
   Redis is optional — without `:redis_url` an instance is fully in-memory and
   never opens a Redis connection.
 
+  ## Several apps in one server
+
+  Pass `:apps` (or set `SOCKETELX_APPS` to a JSON array) to serve several
+  Pusher apps from one port. Each app has its own id, key and secret, and is
+  completely isolated: channels, presence, webhooks, limits and metrics are
+  never shared between apps.
+
+      {Socketelx,
+       name: MyApp.Socketelx,
+       port: 6001,
+       apps: [
+         [id: "chat", key: "chat-key", secret: "chat-secret",
+          allowed_origins: ["https://chat.example.com"]],
+         [id: "admin", key: "admin-key", secret: "admin-secret",
+          webhook_url: "https://admin.example.com/hooks"]
+       ]}
+
+  Everything else you pass (limits, Redis, cluster settings, ...) applies to
+  every app unless an app sets it itself. When calling `trigger/5` or
+  `authorize_channel/4` on a multi-app server, say which app with `app: "chat"`.
+
   ## Several instances in one app
 
   Running more than one named instance in the same app (e.g. two
@@ -39,7 +60,7 @@ defmodule Socketelx do
   use Supervisor
   require Logger
 
-  alias Socketelx.{Config, Naming}
+  alias Socketelx.{Apps, Config, Naming}
 
   @default_name __MODULE__
 
@@ -70,18 +91,27 @@ defmodule Socketelx do
 
   @impl true
   def init({name, opts}) do
-    config = Config.resolve(name, opts)
-    Socketelx.Metrics.init(name)
-    Socketelx.RateLimiter.init(name)
+    configs =
+      for {instance, instance_opts} <- Apps.build(name, opts) do
+        Socketelx.Metrics.init(instance)
+        Socketelx.RateLimiter.init(instance)
+        {instance, Config.resolve(instance, instance_opts)}
+      end
 
-    # Order matters: the registry and backend must exist before the
+    Apps.register(name, Enum.map(configs, &elem(&1, 0)))
+
+    # Order matters: every app's registry and backend must exist before the
     # listener starts accepting sockets, so the listener goes last.
-    children =
-      [{Registry, keys: :duplicate, name: Naming.registry(name)}] ++
-        config.backend.child_specs(name, config) ++
-        [listener_spec(name, config)]
+    app_children =
+      Enum.flat_map(configs, fn {instance, config} ->
+        [{Registry, keys: :duplicate, name: Naming.registry(instance)}] ++
+          config.backend.child_specs(instance, config) ++
+          Socketelx.Webhook.child_specs(instance, config)
+      end)
 
-    Supervisor.init(children, strategy: :one_for_one)
+    # The port, TLS and metrics settings are server-wide, so any app's copy will do.
+    {_instance, first} = hd(configs)
+    Supervisor.init(app_children ++ [listener_spec(name, first)], strategy: :one_for_one)
   end
 
   @doc """
@@ -99,9 +129,11 @@ defmodule Socketelx do
     # long enough to receive the close frame below.
     :ranch.suspend_listener(Naming.listener(name))
 
-    Registry.dispatch(Naming.registry(name), :__all_connections__, fn entries ->
-      for {pid, _socket_id} <- entries, do: send(pid, :go_away)
-    end)
+    for instance <- Apps.instances(name) do
+      Registry.dispatch(Naming.registry(instance), :__all_connections__, fn entries ->
+        for {pid, _socket_id} <- entries, do: send(pid, :go_away)
+      end)
+    end
 
     :ok
   end
@@ -116,6 +148,7 @@ defmodule Socketelx do
   ## Options
 
     * `:socket_id`: skip this connection (the sender, usually)
+    * `:app`: the app id, needed only when the server serves several apps
 
   ## Example
 
@@ -124,6 +157,7 @@ defmodule Socketelx do
   @spec trigger(atom(), String.t(), String.t(), term(), keyword()) :: :ok
   def trigger(name, channel, event, data, opts \\ [])
       when is_binary(channel) and is_binary(event) do
+    name = Apps.fetch!(name, Keyword.get(opts, :app))
     payload = if is_binary(data), do: data, else: Jason.encode!(data)
     Socketelx.Metrics.incr(name, :events_triggered_total)
 
@@ -141,7 +175,8 @@ defmodule Socketelx do
 
   Call it from the endpoint pusher-js is configured to use
   (`channelAuthorization.endpoint`) after you have decided the user may join.
-  For a presence channel pass `user_id` and optionally `user_info`.
+  For a presence channel pass `user_id` and optionally `user_info`. On a
+  multi-app server pass `app: "<app id>"`.
 
   ## Examples
 
@@ -155,7 +190,7 @@ defmodule Socketelx do
   @spec authorize_channel(atom(), String.t(), String.t(), keyword()) :: map()
   def authorize_channel(name, socket_id, channel, opts \\ [])
       when is_binary(socket_id) and is_binary(channel) do
-    config = Config.get(name)
+    config = Config.get(Apps.fetch!(name, Keyword.get(opts, :app)))
 
     case Keyword.fetch(opts, :user_id) do
       {:ok, user_id} ->
@@ -174,6 +209,31 @@ defmodule Socketelx do
     end
   end
 
+  @doc """
+  Signs a user in for pusher-js's `pusher.signin()`. Call it from the endpoint
+  pusher-js is configured to use as `userAuthentication.endpoint`, after you
+  have identified the user, and reply with the returned map as JSON.
+
+  `user` must have an `:id` (a string or integer). Once signed in, events
+  triggered on the channel `"\#server-to-user-<id>"` reach every connection
+  of that user.
+
+      Socketelx.authenticate_user(MyApp.Socketelx, socket_id, %{id: "42", name: "Ada"})
+      #=> %{auth: "app-key:...", user_data: "{\\"id\\":\\"42\\",\\"name\\":\\"Ada\\"}"}
+  """
+  @spec authenticate_user(atom(), String.t(), map(), keyword()) :: map()
+  def authenticate_user(name, socket_id, user, opts \\ [])
+      when is_binary(socket_id) and is_map(user) do
+    unless Map.has_key?(user, :id) or Map.has_key?(user, "id") do
+      raise ArgumentError, "the user needs an :id"
+    end
+
+    config = Config.get(Apps.fetch!(name, Keyword.get(opts, :app)))
+    user_data = Jason.encode!(user)
+    sig = Socketelx.Auth.sign(config.app_secret, "#{socket_id}::user::#{user_data}")
+    %{auth: "#{config.app_key}:#{sig}", user_data: user_data}
+  end
+
   defp listener_spec(name, config) do
     dispatch = [
       {:_,
@@ -183,16 +243,25 @@ defmodule Socketelx do
        ]}
     ]
 
+    {scheme, tls} =
+      if config.tls_certfile,
+        do: {:https, [certfile: config.tls_certfile, keyfile: config.tls_keyfile]},
+        else: {:http, []}
+
     spec =
       Plug.Cowboy.child_spec(
-        scheme: :http,
+        scheme: scheme,
         plug: {Socketelx.HttpRouter, name: name},
-        options: [port: config.port, ref: Naming.listener(name), dispatch: dispatch]
+        options: [port: config.port, ref: Naming.listener(name), dispatch: dispatch] ++ tls
       )
 
+    apps = Apps.instances(name)
+
     Logger.info(
-      "Socketelx[#{inspect(name)}] listening on port #{config.port} " <>
-        "(backend: #{inspect(config.backend)}, node: #{config.node_id})"
+      "Socketelx[#{inspect(name)}] listening on port #{config.port}" <>
+        if(scheme == :https, do: " (TLS)", else: "") <>
+        " (backend: #{inspect(config.backend)}, node: #{config.node_id}" <>
+        if(apps == [name], do: ")", else: ", apps: #{length(apps)})")
     )
 
     Map.put(spec, :id, {:listener, name})

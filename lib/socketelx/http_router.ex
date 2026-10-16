@@ -7,6 +7,7 @@ defmodule Socketelx.HttpRouter do
     * `GET /apps/{app_id}/channels`: list occupied channels
       (`filter_by_prefix`, and `info=user_count` for presence channels)
     * `GET /apps/{app_id}/channels/{channel}`: one channel's info
+    * `GET /apps/{app_id}/channels/{channel}/users`: who is in a presence channel
     * `GET /`: health check; `GET /metrics`: Prometheus metrics (opt-in)
 
   Signature verification happens on the raw body/query, before any JSON
@@ -19,10 +20,11 @@ defmodule Socketelx.HttpRouter do
   """
   use Plug.Router
 
-  alias Socketelx.{Auth, Cluster, Config, Metrics, RateLimiter}
+  alias Socketelx.{Apps, Auth, Cluster, Config, Metrics, RateLimiter}
 
   plug :match
   plug :fetch_query_params
+  plug :resolve_app
   plug :rate_limit
   plug :dispatch
 
@@ -34,16 +36,32 @@ defmodule Socketelx.HttpRouter do
     name = Keyword.get(opts, :name, Socketelx)
 
     conn
+    |> Plug.Conn.put_private(:socketelx_root, name)
     |> Plug.Conn.put_private(:socketelx_instance, name)
     |> super(opts)
   end
+
+  # `/apps/:id/...` belongs to the app with that id (an unknown id looks the
+  # same as a bad signature). Everything else is server-wide.
+  defp resolve_app(%Plug.Conn{path_info: ["apps", app_id | _]} = conn, _opts) do
+    case Apps.by_id(conn.private.socketelx_root, app_id) do
+      nil ->
+        conn |> send_json(401, %{error: "invalid signature"}) |> halt()
+
+      instance ->
+        Plug.Conn.put_private(conn, :socketelx_instance, instance)
+    end
+  end
+
+  defp resolve_app(conn, _opts), do: conn
 
   get "/" do
     send_resp(conn, 200, "ok")
   end
 
   get "/metrics" do
-    config = Config.get(conn.private.socketelx_instance)
+    instances = Apps.instances(conn.private.socketelx_root)
+    config = Config.get(hd(instances))
 
     cond do
       not config.metrics ->
@@ -57,7 +75,7 @@ defmodule Socketelx.HttpRouter do
       true ->
         conn
         |> put_resp_content_type("text/plain; version=0.0.4")
-        |> send_resp(200, Metrics.render(conn.private.socketelx_instance))
+        |> send_resp(200, render_metrics(instances))
     end
   end
 
@@ -77,6 +95,10 @@ defmodule Socketelx.HttpRouter do
 
   get "/apps/:app_id/channels/:channel" do
     handle_channel_info(conn, app_id, channel)
+  end
+
+  get "/apps/:app_id/channels/:channel/users" do
+    handle_channel_users(conn, app_id, channel)
   end
 
   match _ do
@@ -102,6 +124,11 @@ defmodule Socketelx.HttpRouter do
   end
 
   defp rate_limit(conn, _opts), do: conn
+
+  defp render_metrics([only]), do: Metrics.render(only)
+
+  defp render_metrics(instances),
+    do: instances |> Enum.map(&{&1, Config.get(&1).app_id}) |> Metrics.render_many()
 
   defp metrics_authorized?(_conn, nil), do: true
 
@@ -206,6 +233,7 @@ defmodule Socketelx.HttpRouter do
         channels =
           name
           |> Cluster.list_channels()
+          |> Enum.reject(&String.starts_with?(&1, "#server-to-user-"))
           |> Enum.filter(&String.starts_with?(&1, prefix))
           |> Map.new(fn channel ->
             attrs =
@@ -239,6 +267,26 @@ defmodule Socketelx.HttpRouter do
 
       :unauthorized ->
         send_json(conn, 401, %{error: "invalid signature"})
+    end
+  end
+
+  defp handle_channel_users(conn, app_id, channel) do
+    name = conn.private.socketelx_instance
+
+    cond do
+      authorize(conn, "GET", app_id, nil) != :ok ->
+        send_json(conn, 401, %{error: "invalid signature"})
+
+      not String.starts_with?(channel, "presence-") ->
+        send_json(conn, 400, %{error: "users are only available for presence channels"})
+
+      true ->
+        users =
+          name
+          |> Cluster.presence_members(channel)
+          |> Enum.map(fn {user_id, _info} -> %{id: user_id} end)
+
+        send_json(conn, 200, %{users: users})
     end
   end
 

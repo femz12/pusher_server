@@ -72,7 +72,7 @@ defmodule Socketelx.Backend.Distributed do
     warn_if_default_cookie()
 
     [
-      %{id: {:pg_scope, @scope}, start: {__MODULE__, :start_scope, []}, type: :supervisor},
+      %{id: {:pg_scope, @scope, name}, start: {__MODULE__, :start_scope, []}, type: :supervisor},
       Supervisor.child_spec({Relay, opts}, id: {:relay, name}),
       Supervisor.child_spec({Member, opts}, id: {:member, name}),
       Supervisor.child_spec(
@@ -176,8 +176,7 @@ defmodule Socketelx.Backend.Distributed do
   # If the cluster had already been told the user left, tell it they are back.
   @impl true
   def presence_restore(name, channel, socket_id, user_id, user_info) do
-    new? =
-      call_leader(name, {:padd, member(name), channel, socket_id, user_id, user_info}, false)
+    new? = call_leader(name, {:padd, member(name), channel, socket_id, user_id, user_info}, false)
 
     GenServer.cast(member(name), {:track, channel, socket_id, user_id, user_info})
 

@@ -5,7 +5,7 @@ Add the dependency:
 ```elixir
 # mix.exs
 defp deps do
-  [{:socketelx, "~> 0.3"}]
+  [{:socketelx, "~> 0.4"}]
 end
 ```
 

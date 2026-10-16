@@ -28,8 +28,10 @@ to browsers and phones as they happen.
 - Presence that counts a user once across tabs and devices
 - Client events (`client-*`) for things like typing indicators
 - REST API: trigger events, batch events, list channels, channel info
-- Signed webhooks with retries
-- Optional rate limits, connection cap, and Prometheus metrics
+- User sign-in (`pusher.signin()`) and events sent to one user
+- Signed webhooks with retries, optionally kept on disk across restarts
+- Several apps (id, key, secret) in one server, fully isolated
+- Allowed origins, optional rate limits, connection caps (also per IP), built-in TLS, and Prometheus metrics
 - Multi-server mode through Redis (optional), or Erlang clustering with no
   Redis (**experimental**)
 - Graceful shutdown: clients are told to reconnect before a node exits
@@ -37,38 +39,6 @@ to browsers and phones as they happen.
 It works with the clients and libraries you probably already use: `pusher-js`,
 `laravel-echo`, and the official Pusher server SDKs (Node, PHP, Python, Ruby,
 Go and others).
-
-## Why Elixir for this
-
-A WebSocket server spends its life holding thousands of mostly idle connections
-and pushing small messages to many of them at once. That is what the Erlang VM
-(BEAM) was built for, and it shows in how Socketelx behaves:
-
-- **One tiny process per connection.** Each client is isolated. A client that
-  misbehaves or crashes takes down only itself, never its neighbours.
-- **Every CPU core, from one process.** The VM runs a scheduler per core, so a
-  single node uses the whole machine. Servers built on a single-threaded event
-  loop (Node, ReactPHP) use one core per process and need several processes, plus
-  a shared store, to use the rest.
-- **Fair scheduling.** The VM pre-empts work, so one busy channel or slow
-  client cannot hold up everyone else, and latency stays even under load.
-- **Supervision.** Parts of the server restart on their own when they fail,
-  without restarting the whole server or dropping the other connections.
-- **Clustering is built in.** Nodes can join up without any extra service. That
-  is what the experimental Erlang cluster mode uses.
-- **Clean restarts.** On shutdown the server tells clients to reconnect before it
-  exits, so a rolling deploy is a blip, not an outage.
-
-For comparison, a Laravel Reverb server is a PHP process around a single event
-loop, and growing past one process means running more of them with Redis in
-between.
-
-Those are properties of the platform. What we have actually measured is modest:
-on one small machine, with the load generator on the same host, 1,000
-connections received 100% of 25,000 messages at a p99 latency of about 6 ms. We
-have **not** run a head-to-head against Reverb or Soketi, so no speed claim is
-made here. [`bench/load.mjs`](guides/load-testing.md) is included so you can
-measure on your own hardware and your own traffic.
 
 ## Quickstart: Docker
 
@@ -118,7 +88,7 @@ the whole thing.
 
 ```elixir
 # mix.exs
-{:socketelx, "~> 0.3"}
+{:socketelx, "~> 0.2"}
 
 # lib/my_app/application.ex
 children = [
@@ -146,6 +116,8 @@ The server runs its own listener on its own port; it is not a Plug inside your
 Phoenix endpoint. See the [Embedding guide](guides/embedding.md).
 
 ## A complete example: simple chat
+
+![Two browsers chatting: presence, typing indicator, messages](https://raw.githubusercontent.com/socketelx/socketelx/main/examples/chat/docs/chat-demo.gif)
 
 [`examples/chat`](examples/chat/README.md) is a small chat app (online list,
 messages, "is typing") in two versions: one using the Docker image with a tiny
@@ -175,6 +147,7 @@ has had less real-world use than the Redis mode. See the
 - [Getting started](guides/getting-started.md): run it and connect a client
 - [Configuration](guides/configuration.md): every option and environment variable
 - [Embedding](guides/embedding.md): use it as a library
+- [Several apps in one server](guides/multi-app.md): separate id, key, secret and origins per app
 - [Multi-server](guides/multi-server.md): Redis, the experimental Erlang cluster mode, and failure behaviour
 - [Deployment](guides/deployment.md): TLS, proxies, Docker, shutdown
 - [Load testing](guides/load-testing.md): simulate connections and measure capacity
@@ -197,9 +170,8 @@ Not verified yet: behaviour at very large scale (see
 [Load testing](guides/load-testing.md) to measure your own), the Compose/nginx
 example, and Elixir versions other than the ones CI uses.
 
-Not implemented: user sign-in features and the users endpoints, durable webhook
-retries, per-IP limits, built-in TLS, Redis Cluster. Delivery is at-most-once,
-like Pusher. Details in [Protocol support](guides/protocol-support.md).
+Not implemented: terminating a user's connections through the API, the sign-in
+watchlist, Redis Cluster. Delivery is at-most-once, like Pusher. Details in [Protocol support](guides/protocol-support.md).
 
 ## Development and contributing
 

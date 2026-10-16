@@ -6,8 +6,12 @@ defmodule Socketelx.TestWsClient do
   # a closed connection arrives as `{:ws_closed, client_pid}`.
   use GenServer
 
-  def start(port, app_key, owner \\ self()) do
-    GenServer.start(__MODULE__, {port, "/app/#{app_key}?protocol=7", owner})
+  # opts: `headers: [{"Origin", "https://x.com"}]` for extra request headers
+  def start(port, app_key, owner \\ self(), opts \\ []) do
+    GenServer.start(
+      __MODULE__,
+      {port, "/app/#{app_key}?protocol=7", owner, Keyword.get(opts, :headers, [])}
+    )
   end
 
   def send_json(client, map), do: GenServer.cast(client, {:send, Jason.encode!(map)})
@@ -16,13 +20,14 @@ defmodule Socketelx.TestWsClient do
   def kill(client), do: GenServer.stop(client)
 
   @impl true
-  def init({port, path, owner}) do
+  def init({port, path, owner, extra}) do
     {:ok, sock} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false, packet: :raw])
     key = Base.encode64(:crypto.strong_rand_bytes(16))
 
     :ok =
       :gen_tcp.send(sock, [
         "GET #{path} HTTP/1.1\r\nHost: 127.0.0.1:#{port}\r\nUpgrade: websocket\r\n",
+        Enum.map(extra, fn {k, v} -> "#{k}: #{v}\r\n" end),
         "Connection: Upgrade\r\nSec-WebSocket-Key: #{key}\r\nSec-WebSocket-Version: 13\r\n\r\n"
       ])
 

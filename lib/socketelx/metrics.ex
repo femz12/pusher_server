@@ -55,33 +55,56 @@ defmodule Socketelx.Metrics do
   end
 
   @doc "Renders every counter and gauge in the Prometheus text exposition format."
-  def render(name) do
+  def render(name), do: render_many([{name, nil}])
+
+  @doc """
+  Like `render/1` for several apps at once: one sample per app, labelled
+  `app="<id>"`, under a single HELP/TYPE header per metric. `apps` is a list
+  of `{instance, app_id}`; an app id of `nil` means no label.
+  """
+  def render_many(apps) do
     counters =
       for {key, help} <- @counters do
-        metric = "socketelx_#{key}"
-        "# HELP #{metric} #{help}\n# TYPE #{metric} counter\n#{metric} #{get(name, key)}\n"
+        samples = for {name, id} <- apps, do: {id, get(name, key)}
+        block("socketelx_#{key}", help, "counter", samples)
       end
 
-    registry = Socketelx.Naming.registry(name)
-    connections = Registry.count_match(registry, :__all_connections__, :_)
-
-    channels =
-      registry
-      |> Registry.select([{{:"$1", :_, :_}, [], [:"$1"]}])
-      |> Enum.reject(&(&1 == :__all_connections__))
-      |> Enum.uniq()
-      |> length()
-
     gauges = [
-      {"socketelx_connections", "Open WebSocket connections on this node", connections},
-      {"socketelx_channels", "Channels with a subscriber on this node", channels}
+      {"socketelx_connections", "Open WebSocket connections on this node",
+       fn name -> connections(name) end},
+      {"socketelx_channels", "Channels with a subscriber on this node",
+       fn name -> channel_count(name) end}
     ]
 
     gauge_text =
-      for {metric, help, value} <- gauges do
-        "# HELP #{metric} #{help}\n# TYPE #{metric} gauge\n#{metric} #{value}\n"
+      for {metric, help, fun} <- gauges do
+        block(metric, help, "gauge", for({name, id} <- apps, do: {id, fun.(name)}))
       end
 
     IO.iodata_to_binary(counters ++ gauge_text)
+  end
+
+  defp block(metric, help, type, samples) do
+    lines =
+      for {id, value} <- samples do
+        label = if id, do: ~s({app="#{escape(id)}"}), else: ""
+        "#{metric}#{label} #{value}\n"
+      end
+
+    ["# HELP #{metric} #{help}\n# TYPE #{metric} #{type}\n" | lines]
+  end
+
+  defp escape(id), do: id |> String.replace("\\", "\\\\") |> String.replace("\"", "\\\"")
+
+  defp connections(name),
+    do: Registry.count_match(Socketelx.Naming.registry(name), :__all_connections__, :_)
+
+  defp channel_count(name) do
+    name
+    |> Socketelx.Naming.registry()
+    |> Registry.select([{{:"$1", :_, :_}, [], [:"$1"]}])
+    |> Enum.reject(&(&1 == :__all_connections__))
+    |> Enum.uniq()
+    |> length()
   end
 end

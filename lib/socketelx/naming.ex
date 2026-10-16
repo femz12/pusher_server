@@ -32,4 +32,9 @@ defmodule Socketelx.Naming do
   def dist_member(name), do: Module.concat(name, DistMember)
   @doc false
   def dist_relay(name), do: Module.concat(name, DistRelay)
+
+  @doc false
+  def webhook_queue(name), do: Module.concat(name, WebhookQueue)
+  @doc false
+  def ip_counts(name), do: Module.concat(name, IpCounts)
 end

@@ -33,6 +33,27 @@ defmodule Socketelx.Config do
   | `:batch_limit`             | `SOCKETELX_BATCH_LIMIT`            | `10` (max events per `batch_events` request) |
   | `:metrics`                 | `SOCKETELX_METRICS`                | `false` (serve Prometheus metrics at `GET /metrics`) |
   | `:metrics_token`           | `SOCKETELX_METRICS_TOKEN`          | none (if set, `/metrics` requires `Authorization: Bearer <token>`) |
+  | `:allowed_origins`         | `SOCKETELX_ALLOWED_ORIGINS`        | none (every origin may connect; see below) |
+  | `:max_connections_per_ip`  | `SOCKETELX_MAX_CONNECTIONS_PER_IP` | none (max simultaneous WebSocket connections from one client IP) |
+  | `:client_ip_header`        | `SOCKETELX_CLIENT_IP_HEADER`       | none (read the client IP from this header, e.g. `cf-connecting-ip`; see below) |
+  | `:webhook_queue_path`      | `SOCKETELX_WEBHOOK_QUEUE_PATH`     | none (a directory; failed webhooks are kept there and survive a restart) |
+  | `:tls_certfile`            | `SOCKETELX_TLS_CERTFILE`           | none (with `:tls_keyfile`, serve HTTPS/WSS directly) |
+  | `:tls_keyfile`             | `SOCKETELX_TLS_KEYFILE`            | none |
+  | `:apps`                    | `SOCKETELX_APPS`                   | none (several apps in one server, see `Socketelx` and the multi-app guide) |
+
+  ## Allowed origins
+
+  Browsers send an `Origin` header on every WebSocket connection. With
+  `:allowed_origins` unset (or containing `"*"`) every origin is accepted.
+  Otherwise the origin must match one entry: a full origin
+  (`"https://chat.example.com"`, scheme and port included), a bare host
+  (`"chat.example.com"`, any scheme or port) or a wildcard host
+  (`"*.example.com"`, any subdomain but not `example.com` itself). Give a
+  list, or a comma-separated string in the environment variable. A refused
+  connection receives `pusher:error` 4009 and is closed. Connections without
+  an `Origin` header (servers, mobile apps) are not affected: the check
+  protects against other websites using your visitors' browsers, it is not
+  authentication.
 
   Setting `:redis_url` switches the instance to the Redis backend so
   several nodes can share channels, presence and broadcasts. Setting
@@ -69,7 +90,13 @@ defmodule Socketelx.Config do
     :max_connections,
     :batch_limit,
     :metrics,
-    :metrics_token
+    :metrics_token,
+    :allowed_origins,
+    :max_connections_per_ip,
+    :client_ip_header,
+    :webhook_queue_path,
+    :tls_certfile,
+    :tls_keyfile
   ]
 
   @type t :: %__MODULE__{}
@@ -122,8 +149,23 @@ defmodule Socketelx.Config do
       max_connections: opt_int(opts, :max_connections, "MAX_CONNECTIONS"),
       batch_limit: opt_int(opts, :batch_limit, "BATCH_LIMIT") || 10,
       metrics: Keyword.get(opts, :metrics, env("METRICS") in ["true", "1"]),
-      metrics_token: Keyword.get(opts, :metrics_token) || blank_to_nil(env("METRICS_TOKEN"))
+      metrics_token: Keyword.get(opts, :metrics_token) || blank_to_nil(env("METRICS_TOKEN")),
+      allowed_origins:
+        parse_origins(Keyword.get(opts, :allowed_origins) || blank_to_nil(env("ALLOWED_ORIGINS"))),
+      max_connections_per_ip: opt_int(opts, :max_connections_per_ip, "MAX_CONNECTIONS_PER_IP"),
+      client_ip_header:
+        (Keyword.get(opts, :client_ip_header) || blank_to_nil(env("CLIENT_IP_HEADER")))
+        |> then(&(&1 && String.downcase(&1))),
+      webhook_queue_path:
+        Keyword.get(opts, :webhook_queue_path) || blank_to_nil(env("WEBHOOK_QUEUE_PATH")),
+      tls_certfile: Keyword.get(opts, :tls_certfile) || blank_to_nil(env("TLS_CERTFILE")),
+      tls_keyfile: Keyword.get(opts, :tls_keyfile) || blank_to_nil(env("TLS_KEYFILE"))
     }
+
+    if Enum.count([config.tls_certfile, config.tls_keyfile], & &1) == 1 do
+      raise ArgumentError,
+            "Socketelx[#{inspect(name)}]: set both :tls_certfile and :tls_keyfile (or neither)"
+    end
 
     warn_if_default_secret(name, config)
     :persistent_term.put({__MODULE__, name}, config)
@@ -158,6 +200,17 @@ defmodule Socketelx.Config do
       nil -> env_name |> env() |> blank_to_nil() |> to_int()
       value -> to_int(value)
     end
+  end
+
+  # nil means "every origin". Anything containing "*" alone does too.
+  defp parse_origins(nil), do: nil
+
+  defp parse_origins(string) when is_binary(string),
+    do: string |> String.split(",", trim: true) |> parse_origins()
+
+  defp parse_origins(list) when is_list(list) do
+    patterns = list |> Enum.map(&(&1 |> to_string() |> String.trim())) |> Enum.reject(&(&1 == ""))
+    if patterns == [] or "*" in patterns, do: nil, else: Enum.map(patterns, &String.downcase/1)
   end
 
   defp parse_cluster(nil), do: nil
@@ -203,4 +256,37 @@ defmodule Socketelx.Config do
 
   @doc false
   def valid_app_id?(name, id), do: id == get(name).app_id
+
+  @doc """
+  Whether a browser `Origin` header value may open a WebSocket on this
+  instance. `nil` (no header) is always allowed; see the module docs.
+  """
+  def origin_allowed?(name, origin), do: match_origin?(get(name).allowed_origins, origin)
+
+  defp match_origin?(nil, _origin), do: true
+  defp match_origin?(_patterns, nil), do: true
+  defp match_origin?(_patterns, ""), do: true
+
+  defp match_origin?(patterns, origin) do
+    origin = String.downcase(origin)
+    host = origin_host(origin)
+
+    Enum.any?(patterns, fn pattern ->
+      cond do
+        String.contains?(pattern, "://") -> pattern == origin
+        String.starts_with?(pattern, "*.") -> host != nil and wildcard_host?(host, pattern)
+        true -> pattern == host
+      end
+    end)
+  end
+
+  # "https://Chat.Example.com:8443" -> "chat.example.com"; anything else (e.g. "null") -> nil
+  defp origin_host(origin) do
+    case URI.parse(origin) do
+      %URI{host: host} when is_binary(host) and host != "" -> host
+      _ -> nil
+    end
+  end
+
+  defp wildcard_host?(host, "*" <> suffix), do: String.ends_with?(host, suffix)
 end

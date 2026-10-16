@@ -32,6 +32,13 @@ defmodule Socketelx.Auth do
     secure_compare(expected, provided_auth || "")
   end
 
+  @doc "Verifies the `auth` string of a `pusher:signin` (user authentication) message."
+  def valid_signin?(name, socket_id, user_data, provided_auth) do
+    config = Socketelx.Config.get(name)
+    expected = "#{config.app_key}:#{sign(config.app_secret, "#{socket_id}::user::#{user_data}")}"
+    secure_compare(expected, provided_auth || "")
+  end
+
   @doc """
   Verifies a REST API request's `auth_signature` query param.
 

@@ -36,11 +36,65 @@ In Docker, cluster mode also uses the release's own variables, which are not
 Socketelx settings: `RELEASE_COOKIE` (shared secret, required in practice),
 `RELEASE_NODE` and `RELEASE_DISTRIBUTION`. See [Multi-server](multi-server.md).
 
-## One app per instance
+| `:allowed_origins`         | `SOCKETELX_ALLOWED_ORIGINS`        | all origins        | Which websites may open a WebSocket. See [Allowed origins](#allowed-origins). |
+| `:max_connections_per_ip`  | `SOCKETELX_MAX_CONNECTIONS_PER_IP` | none               | Simultaneous WebSocket connections per client IP. See [Per-IP limit](#per-ip-limit). |
+| `:client_ip_header`        | `SOCKETELX_CLIENT_IP_HEADER`       | none               | Take the client IP from this header (behind a proxy). |
+| `:webhook_queue_path`      | `SOCKETELX_WEBHOOK_QUEUE_PATH`     | none               | Directory where failed webhooks wait, so they survive a restart. |
+| `:tls_certfile`, `:tls_keyfile` | `SOCKETELX_TLS_CERTFILE`, `SOCKETELX_TLS_KEYFILE` | none | Serve HTTPS and WSS directly, without a proxy. |
+| `:apps`                    | `SOCKETELX_APPS`                   | none               | Several apps in one server. See [Several apps](multi-app.md). |
 
-An instance serves exactly one app (one id, key and secret). To serve several
-apps, embed several named instances on different ports; see the
-[Embedding guide](embedding.md).
+## One app, or several
+
+By default a server has one app (one id, key and secret). To serve several apps
+from one port, see [Several apps in one server](multi-app.md).
+
+## Allowed origins
+
+Browsers send an `Origin` header when opening a WebSocket. By default every
+origin is accepted. To accept only your own sites:
+
+```bash
+SOCKETELX_ALLOWED_ORIGINS=https://chat.example.com,*.example.org
+```
+
+Each entry is one of:
+
+| Entry | Matches |
+|---|---|
+| `https://chat.example.com` | exactly that origin (scheme and port included) |
+| `chat.example.com` | that host on any scheme or port |
+| `*.example.org` | any subdomain of `example.org`, but not `example.org` itself |
+| `*` | everything (the default) |
+
+A refused connection receives `pusher:error` 4009 and is closed. Connections
+without an `Origin` header (backend scripts, mobile apps) are not affected: this
+stops other websites from using your visitors' browsers, it is not a login. In
+Elixir, pass a list: `allowed_origins: ["https://chat.example.com"]`.
+
+## Per-IP limit
+
+`SOCKETELX_MAX_CONNECTIONS_PER_IP=20` allows each client address at most 20
+simultaneous WebSocket connections (more get `pusher:error` 4100). Behind a
+proxy or tunnel every connection looks like it comes from the proxy, so also set
+`SOCKETELX_CLIENT_IP_HEADER` to the header your proxy fills in with the real
+address (`cf-connecting-ip` on Cloudflare, `x-forwarded-for` for most others;
+the first address in a list is used). Only set it when the proxy overwrites that
+header, otherwise clients can fake it.
+
+## Built-in TLS
+
+Set `SOCKETELX_TLS_CERTFILE` and `SOCKETELX_TLS_KEYFILE` (PEM files) and the
+server speaks HTTPS and WSS on its port. Most deployments terminate TLS at a
+proxy or Cloudflare instead, which is fine; use this when nothing sits in front.
+Certificates are read at start, so restart to renew.
+
+## User sign-in and events to one user
+
+`pusher.signin()` in `pusher-js` identifies the person behind a connection.
+Point `userAuthentication.endpoint` at a route that calls
+`Socketelx.authenticate_user/4` (or signs `socket_id::user::user_data` with
+HMAC-SHA256 in any language). Once signed in, an event triggered on the channel
+`#server-to-user-<id>` reaches every connection of that user, on any node.
 
 ## Client events
 
@@ -67,8 +121,11 @@ delivery (network error, timeout, HTTP 5xx, 408 or 429) is retried up to
 4 s. Other 4xx responses are not retried, because the receiver rejected the
 payload. Two things to design for:
 
-- Retries are held in memory. If the node stops while a retry is pending, that
-  webhook is lost.
+- By default retries are held in memory, so a webhook still waiting for a retry
+  is lost if the node stops. Set `SOCKETELX_WEBHOOK_QUEUE_PATH` to a directory
+  (a mounted volume in Docker) and a webhook that failed its first attempt is
+  saved there and sent again after a restart. It protects against the node
+  restarting, not against losing the disk.
 - Retried events can arrive after later events, so make your receiver
   idempotent and don't rely on order.
 

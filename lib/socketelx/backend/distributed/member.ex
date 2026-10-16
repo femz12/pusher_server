@@ -142,8 +142,7 @@ defmodule Socketelx.Backend.Distributed.Member do
     if member in live(state) do
       # What the member reports is the truth. Anything that differs from what
       # the leader believed is announced; what already matched announces nothing.
-      {data, announcements} =
-        State.replace_member(state.data, member, channels, presence, true)
+      {data, announcements} = State.replace_member(state.data, member, channels, presence, true)
 
       announce(state.name, announcements)
       replicate(state, {:replace, member, channels, presence})

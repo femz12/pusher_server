@@ -16,59 +16,86 @@ defmodule Socketelx.Webhook do
   A failed delivery (network error, timeout, HTTP 5xx, 408 or 429) is
   retried up to `:webhook_retries` times (default 3) with a doubling delay
   starting at `:webhook_retry_base_ms` (default 1 s). Other 4xx responses
-  are not retried. Retries live in memory: if the node stops meanwhile,
-  pending retries are lost, and retried events can arrive out of order, so
-  receivers should be idempotent. Delivery is at-least-once while the node
-  stays up.
+  are not retried. Retried events can arrive out of order, so receivers
+  should be idempotent.
+
+  By default pending retries live in memory: if the node stops meanwhile
+  they are lost, and delivery is at-least-once only while the node stays up.
+  Set `:webhook_queue_path` (`SOCKETELX_WEBHOOK_QUEUE_PATH`) to a directory
+  and a webhook that failed its first attempt is also written to a small
+  file there, removed once it is delivered or given up on. After a restart
+  the node delivers whatever is still in the file. In Docker, mount a volume
+  at that path. It protects against this node restarting, not against losing
+  its disk.
   """
   require Logger
   alias Socketelx.{Auth, Config, Metrics}
+  alias Socketelx.Webhook.Queue
 
   @doc "Builds the {body, headers} for a webhook payload. Pure — no I/O, easy to test."
   def build(name, events) when is_list(events) do
     config = Config.get(name)
     body = Jason.encode!(%{time_ms: System.system_time(:millisecond), events: events})
-    signature = Auth.sign(config.app_secret, body)
+    {body, headers(config, body)}
+  end
 
-    headers = [
+  defp headers(config, body) do
+    [
       {~c"content-type", ~c"application/json"},
       {~c"x-pusher-key", to_charlist(config.app_key)},
-      {~c"x-pusher-signature", to_charlist(signature)}
+      {~c"x-pusher-signature", to_charlist(Auth.sign(config.app_secret, body))}
     ]
-
-    {body, headers}
   end
 
   @doc "Starts delivery in the background (with retries). No-op if this instance has no webhook_url configured."
   def dispatch(name, events) when is_list(events) do
-    case Config.get(name).webhook_url do
-      nil -> :ok
-      url -> Task.start(fn -> send_webhook(name, url, events) end)
+    if Config.get(name).webhook_url do
+      {body, _headers} = build(name, events)
+      Task.start(fn -> run(name, new_id(), body, 0) end)
     end
 
     :ok
   end
 
-  defp send_webhook(name, url, events) do
-    config = Config.get(name)
-    {body, headers} = build(name, events)
-    attempt(name, url, body, headers, 0, config.webhook_retries, config.webhook_retry_base_ms)
+  @doc false
+  def child_specs(name, %{webhook_queue_path: path, webhook_url: url}) do
+    if path && url,
+      do: [Supervisor.child_spec({Socketelx.Webhook.Queue, name}, id: {:webhook_queue, name})],
+      else: []
   end
 
-  defp attempt(name, url, body, headers, n, max_retries, base_ms) do
-    case post(url, body, headers) do
+  @doc false
+  # Used by the queue after a restart: carry on delivering a saved webhook.
+  def resume(name, id, body, attempt), do: run(name, id, body, attempt)
+
+  defp new_id, do: {System.system_time(:microsecond), :erlang.unique_integer([:positive])}
+
+  defp run(name, id, body, n) do
+    config = Config.get(name)
+
+    case config.webhook_url && post(config.webhook_url, body, headers(config, body)) do
+      nil ->
+        Queue.delete(name, id)
+
       :ok ->
         Metrics.incr(name, :webhooks_sent_total)
+        Queue.delete(name, id)
 
-      {:retry, _reason} when n < max_retries ->
+      {:retry, _reason} when n < config.webhook_retries ->
         Metrics.incr(name, :webhook_retries_total)
+        # keep a copy on disk (when enabled) before waiting, so a restart doesn't lose it
+        Queue.save(name, id, body, n + 1)
         # 1s, 2s, 4s ... (with the default base)
-        Process.sleep(base_ms * Integer.pow(2, n))
-        attempt(name, url, body, headers, n + 1, max_retries, base_ms)
+        Process.sleep(config.webhook_retry_base_ms * Integer.pow(2, n))
+        run(name, id, body, n + 1)
 
       {_kind, reason} ->
         Metrics.incr(name, :webhooks_failed_total)
-        Logger.warning("Webhook POST to #{url} failed after #{n + 1} attempt(s): #{reason}")
+        Queue.delete(name, id)
+
+        Logger.warning(
+          "Webhook POST to #{config.webhook_url} failed after #{n + 1} attempt(s): #{reason}"
+        )
     end
   end
 
