@@ -10,6 +10,11 @@ node bench/load.mjs --host 127.0.0.1 --port 6001 \
   --connections 2000 --channels 50 --rate 100 --duration 60
 ```
 
+Options can be written `--rate 100` or `--rate=100`. Unknown options are an error, so a
+typo can't silently fall back to a default. Before connecting anyone, the script sends
+one signed event and stops with a clear message if the server refuses it (usually a
+wrong `--key`, `--app-id` or `--secret`).
+
 | Option | Default | Meaning |
 |---|---|---|
 | `--connections` | 1000 | WebSocket clients to open |
@@ -18,6 +23,9 @@ node bench/load.mjs --host 127.0.0.1 --port 6001 \
 | `--rate` | 50 | Events per second sent through the REST API |
 | `--duration` | 30 | Seconds to send events |
 | `--tls` | off | Use `wss://` and `https://` |
+| `--targets` | none | Several servers, `host:port,host:port`. See [Testing several nodes](#testing-several-nodes) |
+| `--no-ping` | off | Don't send keep-alive pings (connections then close after 60 s of silence) |
+| `--no-preflight` | off | Skip the first check event |
 | `--metrics-url`, `--metrics-token` | none | Also print the server's own `/metrics` gauges |
 
 Example result:
@@ -42,14 +50,28 @@ so treat it as a smoke test. Measure your own hardware.
 - **Latency percentiles** matter more than the average. Watch p99.
 - **Dropped during the test** means connections closed unexpectedly. Check the
   server logs and any proxy timeouts.
+- **The script is one Node process.** It prints how many messages per second it
+  has to receive. Above roughly 50,000 per second it can become the bottleneck
+  instead of the server: you then see multi-second latencies and `ECONNRESET`
+  errors that say more about the generator than about the server. Raise `--rate`
+  step by step and stop reading the results once the generator is the limit.
+- **Failed sends** list their reason (`ECONNRESET`, `EPIPE`, an HTTP status).
+  `connection problem ... non-101` during the ramp usually means the OS refused
+  connections: see the open-file and `somaxconn` notes below.
+- **Clients ping like real ones.** The server closes a connection that is silent for
+  60 seconds, so the script sends `pusher:ping` at the advertised interval.
 
 ## Getting a fair test
 
 1. **Run the load generator on a different machine** from the server, or the two
    compete for the same CPU and the result is meaningless.
-2. **Raise file descriptor limits.** Each connection is a file descriptor on both
-   ends. On Linux run `ulimit -n 100000` in the shell that starts the generator
-   (and for the server container, `--ulimit nofile=100000:100000`).
+2. **Raise file descriptor limits on both sides.** Each connection is a file
+   descriptor in the server **and** in the generator. Run `ulimit -n 65536` in the
+   terminal that starts the generator and in the one that starts the server (for a
+   container, `--ulimit nofile=65536:65536`), and check it with `ulimit -n`. Without
+   this, tests fail at about 1,000 connections on many machines, and the server logs
+   `emfile`. More in [Going to production](production.md#open-file-limit-ulimit).
+   On macOS also raise the accept queue: `sudo sysctl -w kern.ipc.somaxconn=4096`.
 3. **Mind the port limit.** One source IP can open about 28,000 connections to a
    single destination IP and port. For more, run several generators from
    different IPs, or give the server more than one address.
@@ -62,10 +84,29 @@ so treat it as a smoke test. Measure your own hardware.
 
 ## Testing several nodes
 
-Start the nodes with a shared `SOCKETELX_REDIS_URL` (see
-[Multi-server](multi-server.md)), point the generator at the load balancer, and
-compare delivery percentage and latency with a single node. Cross-node delivery
-goes through Redis, so latency will be slightly higher.
+Start the nodes with a shared `SOCKETELX_REDIS_URL` (or in Erlang cluster mode, see
+[Multi-server](multi-server.md)) and give the generator **all** of them:
+
+```bash
+node bench/load.mjs --targets=10.0.0.11:6001,10.0.0.12:6001,10.0.0.13:6001 \
+  --key app-key --app-id app-id --secret app-secret \
+  --connections=10000 --rate=50 --duration=60
+```
+
+Connection number *i* goes to server *i mod N*, and events are published through the
+servers in turn. So most deliveries have to travel from the node that received the
+event to a client on another node. That is exactly the path that differs between Redis
+and Erlang clustering. The result prints how many connections each server holds.
+
+To compare **Redis against Erlang clustering**, run the identical command against the
+same machines set up each way, three times each, alternating, and compare p50 and p99
+and the delivery percentage. Then repeat while you stop one node halfway
+(`docker stop`, or kill the process): connections on that node drop and reconnect
+(the script does not reconnect them, so `dropped` shows how many were on it), while the
+others should keep delivering 100% to the clients that remain.
+
+A load balancer in front also works (`--host`/`--port` at the balancer), but then you
+can't tell which node each client is on.
 
 ## Limits you may hit on purpose
 

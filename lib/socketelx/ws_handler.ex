@@ -99,7 +99,9 @@ defmodule Socketelx.WsHandler do
       data: Jason.encode!(%{socket_id: socket_id, activity_timeout: @activity_timeout_s})
     }
 
-    {:reply, {:text, Jason.encode!(payload)}, %{state | socket_id: socket_id}}
+    # Hibernating shrinks the process to almost nothing while it waits, which is
+    # most of a connection's life. It wakes on the next message.
+    {:reply, {:text, Jason.encode!(payload)}, %{state | socket_id: socket_id}, :hibernate}
   end
 
   @impl :cowboy_websocket
@@ -116,7 +118,8 @@ defmodule Socketelx.WsHandler do
         handle_signin(data, state)
 
       {:ok, %{"event" => "pusher:ping"}} ->
-        {:reply, {:text, Jason.encode!(%{event: "pusher:pong", data: %{}})}, state}
+        # a ping means the connection is quiet: shrink it again
+        {:reply, {:text, Jason.encode!(%{event: "pusher:pong", data: %{}})}, state, :hibernate}
 
       {:ok, %{"event" => "client-" <> _rest = event_name, "channel" => channel} = decoded}
       when is_binary(channel) ->
@@ -259,7 +262,7 @@ defmodule Socketelx.WsHandler do
           do: presence_payload(Cluster.presence_members(state.name, channel)),
           else: %{}
 
-      {:reply, {:text, subscription_succeeded(channel, data)}, state}
+      {:reply, {:text, subscription_succeeded(channel, data)}, state, :hibernate}
     else
       case presence_params(channel, channel_data) do
         :error ->
@@ -269,7 +272,7 @@ defmodule Socketelx.WsHandler do
 
         params ->
           {reply, state} = subscribe_and_reply(channel, params, state)
-          {:reply, {:text, reply}, state}
+          {:reply, {:text, reply}, state, :hibernate}
       end
     end
   end

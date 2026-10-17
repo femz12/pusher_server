@@ -31,10 +31,14 @@ Configuration is by environment variable; see [Configuration](configuration.md).
 
 ## TLS
 
-The server speaks plain HTTP and WebSocket only. Terminate TLS at a reverse
-proxy or load balancer (nginx, Caddy, Traefik, an ALB) and serve `wss://` to
-browsers. Then switch your client and server libraries to TLS (`forceTLS: true`,
-`useTLS: true`) and the public port.
+Browsers need `wss://`. Either terminate TLS at a reverse proxy or load balancer
+(nginx, Caddy, Traefik, an ALB, Cloudflare), or let the server do it: set
+`SOCKETELX_TLS_CERTFILE` and `SOCKETELX_TLS_KEYFILE` (PEM files) and it serves HTTPS
+and WSS on its port. Either way, switch your client and server libraries to TLS
+(`forceTLS: true`, `useTLS: true`) and the public port.
+
+Before going live, read [Going to production](production.md): open-file limits,
+proxy timeouts, memory and monitoring.
 
 ## Reverse proxy
 

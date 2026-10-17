@@ -4,6 +4,23 @@ All notable changes to this project are documented here.
 Format based on [Keep a Changelog](https://keepachangelog.com/), versioning
 follows [Semantic Versioning](https://semver.org/).
 
+## [0.4.2] - 2026-10-17
+
+### Changed
+- **Idle connections use about 3.5 times less memory.** WebSocket processes now
+  hibernate while they wait: 10,000 subscribed connections went from about 570 MB to
+  about 200 MB in a measurement (about 15 KB each). No change in latency or CPU per
+  message.
+- `bench/load.mjs`: accepts `--option=value`, rejects unknown options, sends keep-alive
+  pings like real clients, checks credentials before starting, reports why sends and
+  connections failed, and takes `--targets a:6001,b:6001` to test several nodes.
+
+## [0.4.1] - 2026-10-17
+
+### Added
+- Guides: *Going to production* (open-file limits, proxy and OS settings, monitoring)
+  and *Capacity planning* (what a connection and a message cost, with an 8 GB example).
+
 ## [0.4.0] - 2026-10-16
 
 ### Added

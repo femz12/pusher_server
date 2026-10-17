@@ -145,11 +145,13 @@ has had less real-world use than the Redis mode. See the
 ## Documentation
 
 - [Getting started](guides/getting-started.md): run it and connect a client
-- [Configuration](guides/configuration.md): every option and environment variable
+- [Configuration](guides/configuration.md): every option and environment variable (copy [`.env.example`](.env.example) to start)
 - [Embedding](guides/embedding.md): use it as a library
 - [Several apps in one server](guides/multi-app.md): separate id, key, secret and origins per app
 - [Multi-server](guides/multi-server.md): Redis, the experimental Erlang cluster mode, and failure behaviour
 - [Deployment](guides/deployment.md): TLS, proxies, Docker, shutdown
+- [Going to production](guides/production.md): checklist, open-file limits (`ulimit`), proxy and OS settings, monitoring
+- [Capacity planning](guides/capacity-planning.md): what a connection and a message cost, and what an 8 GB server can carry
 - [Load testing](guides/load-testing.md): simulate connections and measure capacity
 - [Protocol support](guides/protocol-support.md): what is and isn't implemented
 - [Troubleshooting](guides/troubleshooting.md)
